@@ -1,7 +1,7 @@
 """Process tweets through OpenRouter AI for translation and analysis."""
 import logging
 import httpx
-from config import OPENROUTER_API_KEY, OPENROUTER_MODEL
+from config import get_api_key, get_model
 
 logger = logging.getLogger(__name__)
 
@@ -31,19 +31,22 @@ SYSTEM_PROMPT = """Ты — помощник для мониторинга кр�
 
 async def process_tweet(tweet_text: str, username: str) -> str:
     """Send tweet to OpenRouter for translation and analysis."""
-    if not OPENROUTER_API_KEY:
-        return f"⚠️ OpenRouter API key не настроен\n\nОригинал:\n{tweet_text}"
+    api_key = get_api_key()
+    model = get_model()
+
+    if not api_key:
+        return f"⚠️ OpenRouter API key не настроен. Используй /key\n\nОригинал:\n{tweet_text}"
 
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers={
-                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                    "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": OPENROUTER_MODEL,
+                    "model": model,
                     "messages": [
                         {"role": "system", "content": SYSTEM_PROMPT},
                         {"role": "user", "content": f"Твит от @{username}:\n\n{tweet_text}"},
@@ -58,4 +61,4 @@ async def process_tweet(tweet_text: str, username: str) -> str:
             return data["choices"][0]["message"]["content"]
     except Exception as e:
         logger.error(f"OpenRouter error: {e}")
-        return f"⚠️ Ошибка AI: {e}\n\nОригинал:\n{tweet_text}"
+        return f"⚠️ Ошибка AI ({model}): {e}\n\nОригинал:\n{tweet_text}"
