@@ -37,32 +37,29 @@ async def monitor_loop(app: Application):
 
                 # Fetch tweets
                 tweets = await fetch_nitter_rss(username, client)
-                keywords = db.list_keywords()
+
+                # Get per-account keywords (fall back to global if none set)
+                acct_keywords = db.list_account_keywords(username)
+                if not acct_keywords:
+                    acct_keywords = db.list_keywords()
 
                 for tweet in tweets:
-                    # Skip already seen
                     if db.is_seen(tweet.tweet_id):
                         continue
 
-                    # Check keyword filter
-                    if not matches_keywords(tweet, keywords):
+                    if not matches_keywords(tweet, acct_keywords):
                         db.mark_seen(tweet.tweet_id, tweet.username, tweet.text)
                         continue
 
                     logger.info(f"New matching tweet from @{username}: {tweet.tweet_id}")
 
-                    # Process through AI
                     ai_result = await process_tweet(tweet.text, tweet.username)
 
-                    # Send to Telegram
                     chat_id = TG_CHAT_ID
                     if chat_id:
                         await send_tweet_to_chat(app, chat_id, username, tweet.url, ai_result)
 
-                    # Mark as seen
                     db.mark_seen(tweet.tweet_id, tweet.username, tweet.text)
-
-                    # Small delay between sends to avoid TG rate limit
                     await asyncio.sleep(1)
 
             except Exception as e:

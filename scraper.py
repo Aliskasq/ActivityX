@@ -39,13 +39,12 @@ async def fetch_nitter_rss(username: str, client: httpx.AsyncClient) -> list[Twe
 def parse_rss(xml_text: str, username: str) -> list[Tweet]:
     """Parse Nitter RSS XML into Tweet objects."""
     tweets = []
-    # Simple regex-based XML parsing (no lxml dependency)
     items = re.findall(r"<item>(.*?)</item>", xml_text, re.DOTALL)
     for item in items:
         title_m = re.search(r"<title><!\[CDATA\[(.*?)\]\]></title>", item, re.DOTALL)
         if not title_m:
             title_m = re.search(r"<title>(.*?)</title>", item, re.DOTALL)
-        
+
         link_m = re.search(r"<link>(.*?)</link>", item)
         pubdate_m = re.search(r"<pubDate>(.*?)</pubDate>", item)
         desc_m = re.search(r"<description><!\[CDATA\[(.*?)\]\]></description>", item, re.DOTALL)
@@ -56,7 +55,6 @@ def parse_rss(xml_text: str, username: str) -> list[Tweet]:
             continue
 
         nitter_link = link_m.group(1).strip()
-        # Extract tweet ID from URL
         tid_m = re.search(r"/status/(\d+)", nitter_link)
         if not tid_m:
             continue
@@ -64,12 +62,10 @@ def parse_rss(xml_text: str, username: str) -> list[Tweet]:
         tweet_id = tid_m.group(1)
         text = ""
         if desc_m:
-            # Strip HTML tags from description
             text = re.sub(r"<[^>]+>", "", desc_m.group(1)).strip()
         elif title_m:
             text = re.sub(r"<[^>]+>", "", title_m.group(1)).strip()
 
-        # Convert nitter link to x.com link
         x_url = f"https://x.com/{username}/status/{tweet_id}"
 
         tweets.append(Tweet(
@@ -83,8 +79,23 @@ def parse_rss(xml_text: str, username: str) -> list[Tweet]:
 
 
 def matches_keywords(tweet: Tweet, keywords: list[str]) -> bool:
-    """Check if tweet text contains any of the keywords."""
+    """Check if tweet matches any keyword rule.
+    
+    Rules:
+    - "word" → tweet contains "word"
+    - "word1+word2" → tweet contains BOTH "word1" AND "word2"
+    - Empty keywords list → all tweets pass
+    """
     if not keywords:
-        return True  # no filter = all tweets
+        return True
     text_lower = tweet.text.lower()
-    return any(kw in text_lower for kw in keywords)
+    for kw in keywords:
+        if "+" in kw:
+            # Compound: ALL parts must match
+            parts = [p.strip() for p in kw.split("+") if p.strip()]
+            if parts and all(part in text_lower for part in parts):
+                return True
+        else:
+            if kw in text_lower:
+                return True
+    return False
