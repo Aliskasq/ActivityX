@@ -9,11 +9,15 @@ TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN", "")
 TG_CHAT_ID = os.getenv("TG_CHAT_ID", "")
 ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip()]
 
-# OpenRouter (mutable at runtime via /key and /models)
+# OpenRouter
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "stepfun/step-2-16k")
 
-# Runtime-mutable settings (updated via bot commands, saved to .env)
+# Twitter
+TWITTER_LIST_ID = os.getenv("TWITTER_LIST_ID", "")
+COOKIES_PATH = os.path.join(os.path.dirname(__file__), "cookies.json")
+
+# Runtime-mutable settings
 _runtime = {
     "api_key": OPENROUTER_API_KEY,
     "model": OPENROUTER_MODEL,
@@ -39,7 +43,6 @@ def set_model(model: str):
 
 
 def _save_env(key: str, value: str):
-    """Update .env file so settings persist across restarts."""
     env_path = os.path.join(os.path.dirname(__file__), ".env")
     lines = []
     found = False
@@ -57,13 +60,6 @@ def _save_env(key: str, value: str):
         f.writelines(lines)
 
 
-# Nitter
-NITTER_INSTANCES = [
-    "https://nitter.privacydev.net",
-    "https://nitter.poast.org",
-    "https://nitter.1d4.us",
-]
-
 # Monitoring
-CHECK_INTERVAL_SEC = 300  # 5 minutes between checks (rotate accounts)
+CHECK_INTERVAL_SEC = 1800  # 30 minutes
 DB_PATH = os.path.join(os.path.dirname(__file__), "data", "monitor.db")

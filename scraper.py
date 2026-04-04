@@ -1,11 +1,15 @@
-"""Scrape tweets from Nitter instances."""
-import re
+"""Fetch tweets from Twitter using twikit (cookie-based auth)."""
+import json
 import logging
-import httpx
+import os
 from dataclasses import dataclass
-from config import NITTER_INSTANCES
+from twikit import Client
+
+from config import COOKIES_PATH, TWITTER_LIST_ID
 
 logger = logging.getLogger(__name__)
+
+_client: Client | None = None
 
 
 @dataclass
@@ -17,64 +21,89 @@ class Tweet:
     timestamp: str
 
 
-async def fetch_nitter_rss(username: str, client: httpx.AsyncClient) -> list[Tweet]:
-    """Try multiple Nitter instances to get RSS feed for a user."""
+async def get_client() -> Client | None:
+    """Get or create authenticated Twitter client."""
+    global _client
+    if _client is not None:
+        return _client
+
+    if not os.path.exists(COOKIES_PATH):
+        logger.error(f"cookies.json not found at {COOKIES_PATH}")
+        return None
+
+    try:
+        client = Client("ru")
+        client.load_cookies(COOKIES_PATH)
+        _client = client
+        logger.info("Twitter client initialized with cookies")
+        return _client
+    except Exception as e:
+        logger.error(f"Failed to init Twitter client: {e}")
+        return None
+
+
+def reset_client():
+    """Reset client (e.g. after cookie update)."""
+    global _client
+    _client = None
+
+
+async def fetch_list_tweets(list_id: str | None = None) -> list[Tweet]:
+    """Fetch latest tweets from a Twitter list."""
+    client = await get_client()
+    if not client:
+        return []
+
+    lid = list_id or TWITTER_LIST_ID
+    if not lid:
+        logger.error("TWITTER_LIST_ID not set")
+        return []
+
     tweets = []
-    for instance in NITTER_INSTANCES:
-        try:
-            rss_url = f"{instance}/{username}/rss"
-            resp = await client.get(rss_url, timeout=15, follow_redirects=True)
-            if resp.status_code == 200:
-                tweets = parse_rss(resp.text, username)
-                if tweets:
-                    logger.info(f"Got {len(tweets)} tweets for @{username} from {instance}")
-                    return tweets
-        except Exception as e:
-            logger.warning(f"Nitter instance {instance} failed for @{username}: {e}")
-            continue
-    logger.error(f"All Nitter instances failed for @{username}")
+    try:
+        timeline = await client.get_list_tweets(lid)
+        for t in timeline:
+            username = t.user.screen_name if t.user else "unknown"
+            tweets.append(Tweet(
+                tweet_id=str(t.id),
+                username=username.lower(),
+                text=t.text or "",
+                url=f"https://x.com/{username}/status/{t.id}",
+                timestamp=t.created_at or "",
+            ))
+        logger.info(f"Got {len(tweets)} tweets from list {lid}")
+    except Exception as e:
+        logger.error(f"Error fetching list tweets: {e}", exc_info=True)
+        # Reset client in case cookies expired
+        reset_client()
+
     return tweets
 
 
-def parse_rss(xml_text: str, username: str) -> list[Tweet]:
-    """Parse Nitter RSS XML into Tweet objects."""
+async def fetch_user_tweets(username: str) -> list[Tweet]:
+    """Fetch latest tweets from a specific user (fallback)."""
+    client = await get_client()
+    if not client:
+        return []
+
     tweets = []
-    items = re.findall(r"<item>(.*?)</item>", xml_text, re.DOTALL)
-    for item in items:
-        title_m = re.search(r"<title><!\[CDATA\[(.*?)\]\]></title>", item, re.DOTALL)
-        if not title_m:
-            title_m = re.search(r"<title>(.*?)</title>", item, re.DOTALL)
+    try:
+        user = await client.get_user_by_screen_name(username)
+        if not user:
+            return []
+        user_tweets = await client.get_user_tweets(user.id, "Tweets")
+        for t in user_tweets:
+            tweets.append(Tweet(
+                tweet_id=str(t.id),
+                username=username.lower(),
+                text=t.text or "",
+                url=f"https://x.com/{username}/status/{t.id}",
+                timestamp=t.created_at or "",
+            ))
+        logger.info(f"Got {len(tweets)} tweets from @{username}")
+    except Exception as e:
+        logger.error(f"Error fetching @{username}: {e}", exc_info=True)
 
-        link_m = re.search(r"<link>(.*?)</link>", item)
-        pubdate_m = re.search(r"<pubDate>(.*?)</pubDate>", item)
-        desc_m = re.search(r"<description><!\[CDATA\[(.*?)\]\]></description>", item, re.DOTALL)
-        if not desc_m:
-            desc_m = re.search(r"<description>(.*?)</description>", item, re.DOTALL)
-
-        if not link_m:
-            continue
-
-        nitter_link = link_m.group(1).strip()
-        tid_m = re.search(r"/status/(\d+)", nitter_link)
-        if not tid_m:
-            continue
-
-        tweet_id = tid_m.group(1)
-        text = ""
-        if desc_m:
-            text = re.sub(r"<[^>]+>", "", desc_m.group(1)).strip()
-        elif title_m:
-            text = re.sub(r"<[^>]+>", "", title_m.group(1)).strip()
-
-        x_url = f"https://x.com/{username}/status/{tweet_id}"
-
-        tweets.append(Tweet(
-            tweet_id=tweet_id,
-            username=username,
-            text=text,
-            url=x_url,
-            timestamp=pubdate_m.group(1).strip() if pubdate_m else "",
-        ))
     return tweets
 
 
@@ -87,17 +116,15 @@ def matches_keywords(tweet: Tweet, keywords: list[str], exclusions: list[str] | 
     - Empty list → all tweets pass
 
     Exclusions:
-    - If tweet contains ANY exclusion word → rejected (even if keywords match)
+    - If tweet contains ANY exclusion word → rejected
     """
     text_lower = tweet.text.lower()
 
-    # Check exclusions first
     if exclusions:
         for ex in exclusions:
             if ex in text_lower:
                 return False
 
-    # Check keywords
     if not keywords:
         return True
 

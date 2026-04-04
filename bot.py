@@ -1,6 +1,7 @@
 """Telegram bot with commands for managing Twitter monitor."""
+import json
 import logging
-import httpx
+import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -11,14 +12,14 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
-from config import ADMIN_IDS, get_api_key, set_api_key, get_model, set_model
+from config import ADMIN_IDS, COOKIES_PATH, get_api_key, set_api_key, get_model, set_model
 import database as db
 
 logger = logging.getLogger(__name__)
 
-# Conversation states
 WAITING_TAG = 1
 WAITING_EXCLUSION = 2
+WAITING_COOKIES = 3
 
 
 def is_admin(user_id: int) -> bool:
@@ -34,15 +35,17 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text(
         "🐦 **Twitter Monitor Bot**\n\n"
-        "Команды:\n"
-        "/add `@username` — добавить аккаунт\n"
-        "/remove `@username` — удалить аккаунт\n"
-        "/list — список аккаунтов\n"
-        "/pages — управление тегами и исключениями\n"
-        "/key `новый_ключ` — сменить OpenRouter API ключ\n"
-        "/models — список моделей + текущая\n"
-        "/models `название` — сменить модель\n"
-        "/status — статус мониторинга",
+        "**Аккаунты:**\n"
+        "/add `@username` — добавить\n"
+        "/remove `@username` — удалить\n"
+        "/list — список с тегами\n"
+        "/pages — управление тегами (кнопки)\n\n"
+        "**Настройки:**\n"
+        "/cookies — загрузить куки Twitter\n"
+        "/listid `ID` — установить ID списка Twitter\n"
+        "/key `ключ` — сменить OpenRouter API ключ\n"
+        "/models — список моделей / сменить\n"
+        "/status — статус",
         parse_mode="Markdown",
     )
 
@@ -54,9 +57,9 @@ async def cmd_add(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("Использование: /add @username")
     username = ctx.args[0].lstrip("@").lower()
     if db.add_account(username):
-        await update.message.reply_text(f"✅ @{username} добавлен в мониторинг")
+        await update.message.reply_text(f"✅ @{username} добавлен")
     else:
-        await update.message.reply_text(f"⚠️ @{username} уже в списке")
+        await update.message.reply_text(f"⚠️ @{username} уже есть")
 
 
 async def cmd_remove(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -76,8 +79,8 @@ async def cmd_list(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     accounts = db.list_accounts()
     if not accounts:
-        return await update.message.reply_text("📋 Список пуст. Добавь: /add @username")
-    text = "📋 **Мониторинг аккаунтов:**\n\n"
+        return await update.message.reply_text("📋 Список пуст. /add @username")
+    text = "📋 **Аккаунты:**\n\n"
     for i, acc in enumerate(accounts, 1):
         tags = db.list_account_keywords(acc)
         excl = db.list_account_exclusions(acc)
@@ -89,6 +92,90 @@ async def cmd_list(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text, parse_mode="Markdown")
 
 
+# --- Cookies ---
+
+async def cmd_cookies(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        return
+
+    if ctx.args:
+        # Inline JSON
+        try:
+            cookie_text = " ".join(ctx.args)
+            json.loads(cookie_text)
+            with open(COOKIES_PATH, "w") as f:
+                f.write(cookie_text)
+            from scraper import reset_client
+            reset_client()
+            return await update.message.reply_text("✅ Куки сохранены! Перезапуск клиента.")
+        except json.JSONDecodeError:
+            return await update.message.reply_text("❌ Невалидный JSON")
+
+    has_cookies = os.path.exists(COOKIES_PATH)
+    status = "✅ Загружены" if has_cookies else "❌ Не загружены"
+    await update.message.reply_text(
+        f"🍪 **Куки Twitter:** {status}\n\n"
+        f"Отправь JSON куки следующим сообщением:\n"
+        f"1. Установи расширение Cookie-Editor\n"
+        f"2. Зайди на x.com\n"
+        f"3. Экспортируй куки (JSON)\n"
+        f"4. Отправь сюда как сообщение",
+        parse_mode="Markdown",
+    )
+    ctx.user_data["waiting_cookies"] = True
+    return WAITING_COOKIES
+
+
+async def receive_cookies(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not ctx.user_data.get("waiting_cookies"):
+        return ConversationHandler.END
+    text = update.message.text.strip()
+
+    # Handle file
+    if update.message.document:
+        file = await update.message.document.get_file()
+        await file.download_to_drive(COOKIES_PATH)
+        ctx.user_data.pop("waiting_cookies", None)
+        from scraper import reset_client
+        reset_client()
+        return await update.message.reply_text("✅ Куки сохранены!")
+
+    try:
+        json.loads(text)
+        with open(COOKIES_PATH, "w") as f:
+            f.write(text)
+        ctx.user_data.pop("waiting_cookies", None)
+        from scraper import reset_client
+        reset_client()
+        await update.message.reply_text("✅ Куки сохранены! Клиент перезапущен.")
+        return ConversationHandler.END
+    except json.JSONDecodeError:
+        await update.message.reply_text("❌ Это не JSON. Отправь экспорт куки или /cancel")
+        return WAITING_COOKIES
+
+
+# --- List ID ---
+
+async def cmd_listid(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        return
+    if not ctx.args:
+        from config import TWITTER_LIST_ID
+        current = TWITTER_LIST_ID or "не установлен"
+        return await update.message.reply_text(
+            f"📋 **List ID:** `{current}`\n\nУстановить: /listid 1234567890",
+            parse_mode="Markdown",
+        )
+    list_id = ctx.args[0].strip()
+    # Save to .env
+    from config import _save_env
+    _save_env("TWITTER_LIST_ID", list_id)
+    # Update runtime
+    import config
+    config.TWITTER_LIST_ID = list_id
+    await update.message.reply_text(f"✅ List ID: `{list_id}`\n\n⚠️ Перезапусти бота чтобы применить.", parse_mode="Markdown")
+
+
 # --- Key management ---
 
 async def cmd_key(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -97,57 +184,49 @@ async def cmd_key(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not ctx.args:
         current = get_api_key()
         masked = current[:10] + "..." + current[-4:] if len(current) > 14 else "не установлен"
-        return await update.message.reply_text(f"🔑 Текущий ключ: `{masked}`\n\nСменить: /key новый\\_ключ", parse_mode="Markdown")
-    
-    new_key = ctx.args[0].strip()
-    set_api_key(new_key)
-    await update.message.reply_text(f"✅ API ключ обновлён")
+        return await update.message.reply_text(f"🔑 Ключ: `{masked}`\n\nСменить: /key новый\\_ключ", parse_mode="Markdown")
+    set_api_key(ctx.args[0].strip())
+    await update.message.reply_text("✅ API ключ обновлён")
 
 
-# --- Model management ---
+# --- Models ---
 
 AVAILABLE_MODELS = [
     "stepfun/step-2-16k",
     "stepfun/step-1-8k",
     "google/gemma-2-9b-it:free",
-    "mistralai/mistral-7b-instruct:free",
-    "huggingface/zephyr-7b-beta:free",
-    "openchat/openchat-7b:free",
-    "meta-llama/llama-3-8b-instruct:free",
     "meta-llama/llama-3.1-8b-instruct:free",
     "qwen/qwen-2-7b-instruct:free",
     "google/gemini-2.0-flash-exp:free",
+    "mistralai/mistral-7b-instruct:free",
 ]
 
 
 async def cmd_models(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return
-    
-    # If argument provided — switch model
     if ctx.args:
         model_name = " ".join(ctx.args).strip()
         set_model(model_name)
-        return await update.message.reply_text(f"✅ Модель сменена на: `{model_name}`", parse_mode="Markdown")
-    
-    # Otherwise show current + list
+        return await update.message.reply_text(f"✅ Модель: `{model_name}`", parse_mode="Markdown")
+
     current = get_model()
-    text = f"🤖 **Текущая модель:** `{current}`\n\n**Доступные (бесплатные):**\n"
+    text = f"🤖 **Модель:** `{current}`\n\n"
     for i, m in enumerate(AVAILABLE_MODELS, 1):
         marker = "👉 " if m == current else ""
         text += f"{i}. {marker}`{m}`\n"
-    text += f"\nСменить: /models `название`\n_Можно указать любую модель с OpenRouter_"
+    text += f"\nСменить: /models `название`"
     await update.message.reply_text(text, parse_mode="Markdown")
 
 
-# --- Pages: per-account tag/exclusion management ---
+# --- Pages ---
 
 async def cmd_pages(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return
     accounts = db.list_accounts()
     if not accounts:
-        return await update.message.reply_text("📋 Нет аккаунтов. Добавь: /add @username")
+        return await update.message.reply_text("Нет аккаунтов. /add @username")
     await update.message.reply_text(
         "📄 **Выбери аккаунт:**",
         reply_markup=build_pages_keyboard(accounts),
@@ -159,10 +238,9 @@ def build_pages_keyboard(accounts: list[str]) -> InlineKeyboardMarkup:
     buttons = []
     row = []
     for acc in accounts:
-        tags_count = len(db.list_account_keywords(acc))
-        excl_count = len(db.list_account_exclusions(acc))
-        label = f"@{acc} ({tags_count}t/{excl_count}x)"
-        row.append(InlineKeyboardButton(label, callback_data=f"page:{acc}"))
+        tc = len(db.list_account_keywords(acc))
+        ec = len(db.list_account_exclusions(acc))
+        row.append(InlineKeyboardButton(f"@{acc} ({tc}t/{ec}x)", callback_data=f"page:{acc}"))
         if len(row) == 2:
             buttons.append(row)
             row = []
@@ -174,14 +252,12 @@ def build_pages_keyboard(accounts: list[str]) -> InlineKeyboardMarkup:
 async def callback_page(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    username = query.data.split(":", 1)[1]
-    await show_account_tags(query, username)
+    await show_account_tags(query, query.data.split(":", 1)[1])
 
 
 async def show_account_tags(query, username: str):
     tags = db.list_account_keywords(username)
     exclusions = db.list_account_exclusions(username)
-
     buttons = []
     for tag in tags:
         buttons.append([
@@ -197,20 +273,12 @@ async def show_account_tags(query, username: str):
         InlineKeyboardButton("➕ Тег", callback_data=f"addtag:{username}"),
         InlineKeyboardButton("➕ Исключение", callback_data=f"addexcl:{username}"),
     ])
-    buttons.append([
-        InlineKeyboardButton("⬅️ Назад", callback_data="back:pages"),
-    ])
+    buttons.append([InlineKeyboardButton("⬅️ Назад", callback_data="back:pages")])
 
-    tag_text = "\n".join(f"  🏷 {t}" for t in tags) if tags else "  нет тегов"
-    excl_text = "\n".join(f"  🚫 {e}" for e in exclusions) if exclusions else "  нет исключений"
-    text = (
-        f"🐦 **@{username}**\n\n"
-        f"**Теги:**\n{tag_text}\n\n"
-        f"**Исключения:**\n{excl_text}\n\n"
-        f"_+ = оба слова обязательны_"
-    )
+    tag_text = "\n".join(f"  🏷 {t}" for t in tags) if tags else "  нет"
+    excl_text = "\n".join(f"  🚫 {e}" for e in exclusions) if exclusions else "  нет"
     await query.edit_message_text(
-        text=text,
+        f"🐦 **@{username}**\n\n**Теги:**\n{tag_text}\n\n**Исключения:**\n{excl_text}\n\n_+ = оба слова_",
         reply_markup=InlineKeyboardMarkup(buttons),
         parse_mode="Markdown",
     )
@@ -220,8 +288,6 @@ async def callback_deltag(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     parts = query.data.split(":", 2)
-    if len(parts) < 3:
-        return
     db.remove_account_keyword(parts[1], parts[2])
     await show_account_tags(query, parts[1])
 
@@ -230,8 +296,6 @@ async def callback_delexcl(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     parts = query.data.split(":", 2)
-    if len(parts) < 3:
-        return
     db.remove_account_exclusion(parts[1], parts[2])
     await show_account_tags(query, parts[1])
 
@@ -241,11 +305,8 @@ async def callback_addtag(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     username = query.data.split(":", 1)[1]
     ctx.user_data["adding_tag_for"] = username
-    ctx.user_data["adding_mode"] = "tag"
     await query.edit_message_text(
-        f"🏷 Введи тег для **@{username}**:\n\n"
-        f"_Примеры: giveaway, follow+repost_\n"
-        f"/cancel для отмены",
+        f"🏷 Введи тег для **@{username}**:\n_Примеры: giveaway, follow+repost_\n/cancel",
         parse_mode="Markdown",
     )
     return WAITING_TAG
@@ -258,8 +319,7 @@ async def callback_addexcl(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     ctx.user_data["adding_tag_for"] = username
     ctx.user_data["adding_mode"] = "exclusion"
     await query.edit_message_text(
-        f"🚫 Введи слово-исключение для **@{username}**:\n\n"
-        f"/cancel для отмены",
+        f"🚫 Введи исключение для **@{username}**:\n/cancel",
         parse_mode="Markdown",
     )
     return WAITING_EXCLUSION
@@ -271,15 +331,11 @@ async def receive_tag(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     tag = update.message.text.strip().lower()
     if tag.startswith("/"):
-        await update.message.reply_text("Отменено.")
-        return ConversationHandler.END
-    if db.add_account_keyword(username, tag):
-        await update.message.reply_text(f"✅ Тег «{tag}» → @{username}")
-    else:
-        await update.message.reply_text(f"⚠️ Уже есть")
-    ctx.user_data.pop("adding_tag_for", None)
-    accounts = db.list_accounts()
-    await update.message.reply_text("📄 **Выбери аккаунт:**", reply_markup=build_pages_keyboard(accounts), parse_mode="Markdown")
+        return await _cancel(update, ctx)
+    db.add_account_keyword(username, tag)
+    await update.message.reply_text(f"✅ {tag} → @{username}")
+    ctx.user_data.clear()
+    await update.message.reply_text("📄 **Аккаунты:**", reply_markup=build_pages_keyboard(db.list_accounts()), parse_mode="Markdown")
     return ConversationHandler.END
 
 
@@ -289,110 +345,107 @@ async def receive_exclusion(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     word = update.message.text.strip().lower()
     if word.startswith("/"):
-        await update.message.reply_text("Отменено.")
-        return ConversationHandler.END
-    if db.add_account_exclusion(username, word):
-        await update.message.reply_text(f"✅ Исключение «{word}» → @{username}")
-    else:
-        await update.message.reply_text(f"⚠️ Уже есть")
-    ctx.user_data.pop("adding_tag_for", None)
-    accounts = db.list_accounts()
-    await update.message.reply_text("📄 **Выбери аккаунт:**", reply_markup=build_pages_keyboard(accounts), parse_mode="Markdown")
+        return await _cancel(update, ctx)
+    db.add_account_exclusion(username, word)
+    await update.message.reply_text(f"✅ 🚫{word} → @{username}")
+    ctx.user_data.clear()
+    await update.message.reply_text("📄 **Аккаунты:**", reply_markup=build_pages_keyboard(db.list_accounts()), parse_mode="Markdown")
+    return ConversationHandler.END
+
+
+async def _cancel(update, ctx):
+    ctx.user_data.clear()
+    await update.message.reply_text("Отменено.")
     return ConversationHandler.END
 
 
 async def cancel_input(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    ctx.user_data.pop("adding_tag_for", None)
-    await update.message.reply_text("Отменено.")
-    return ConversationHandler.END
+    return await _cancel(update, ctx)
 
 
 async def callback_back(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    accounts = db.list_accounts()
-    await query.edit_message_text(
-        "📄 **Выбери аккаунт:**",
-        reply_markup=build_pages_keyboard(accounts),
-        parse_mode="Markdown",
-    )
+    await query.edit_message_text("📄 **Аккаунты:**", reply_markup=build_pages_keyboard(db.list_accounts()), parse_mode="Markdown")
 
 
 async def callback_noop(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
 
 
+# --- Status ---
+
 async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return
     accounts = db.list_accounts()
-    acct_with_tags = sum(1 for a in accounts if db.list_account_keywords(a))
-    acct_with_excl = sum(1 for a in accounts if db.list_account_exclusions(a))
-    model = get_model()
+    from config import TWITTER_LIST_ID
+    has_cookies = os.path.exists(COOKIES_PATH)
     await update.message.reply_text(
-        f"📊 **Статус мониторинга**\n\n"
+        f"📊 **Статус**\n\n"
         f"Аккаунтов: {len(accounts)}\n"
-        f"С тегами: {acct_with_tags}\n"
-        f"С исключениями: {acct_with_excl}\n"
-        f"Модель: `{model}`\n"
-        f"Интервал: 5 мин",
+        f"Куки: {'✅' if has_cookies else '❌'}\n"
+        f"List ID: `{TWITTER_LIST_ID or 'не установлен'}`\n"
+        f"Модель: `{get_model()}`\n"
+        f"Интервал: 30 мин",
         parse_mode="Markdown",
     )
 
 
 async def send_tweet_to_chat(app: Application, chat_id: str | int, username: str,
                               tweet_url: str, ai_text: str):
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔗 Открыть в X", url=tweet_url)]
-    ])
+    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Открыть в X", url=tweet_url)]])
     message = f"🐦 **@{username}**\n\n{ai_text}"
     if len(message) > 4000:
         message = message[:4000] + "..."
-    await app.bot.send_message(
-        chat_id=chat_id,
-        text=message,
-        parse_mode="Markdown",
-        reply_markup=keyboard,
-    )
+    await app.bot.send_message(chat_id=chat_id, text=message, parse_mode="Markdown", reply_markup=keyboard)
 
 
 def setup_handlers(app: Application):
-    tag_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(callback_addtag, pattern=r"^addtag:")],
+    cookie_conv = ConversationHandler(
+        entry_points=[CommandHandler("cookies", cmd_cookies)],
         states={
-            WAITING_TAG: [
+            WAITING_COOKIES: [
                 CommandHandler("cancel", cancel_input),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_tag),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_cookies),
+                MessageHandler(filters.Document.ALL, receive_cookies),
             ],
         },
+        fallbacks=[CommandHandler("cancel", cancel_input)],
+        per_message=False,
+    )
+
+    tag_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(callback_addtag, pattern=r"^addtag:")],
+        states={WAITING_TAG: [
+            CommandHandler("cancel", cancel_input),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, receive_tag),
+        ]},
         fallbacks=[CommandHandler("cancel", cancel_input)],
         per_message=False,
     )
 
     excl_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(callback_addexcl, pattern=r"^addexcl:")],
-        states={
-            WAITING_EXCLUSION: [
-                CommandHandler("cancel", cancel_input),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_exclusion),
-            ],
-        },
+        states={WAITING_EXCLUSION: [
+            CommandHandler("cancel", cancel_input),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, receive_exclusion),
+        ]},
         fallbacks=[CommandHandler("cancel", cancel_input)],
         per_message=False,
     )
 
+    app.add_handler(cookie_conv)
     app.add_handler(tag_conv)
     app.add_handler(excl_conv)
 
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("help", cmd_start))
-    app.add_handler(CommandHandler("add", cmd_add))
-    app.add_handler(CommandHandler("remove", cmd_remove))
-    app.add_handler(CommandHandler("list", cmd_list))
-    app.add_handler(CommandHandler("pages", cmd_pages))
-    app.add_handler(CommandHandler("key", cmd_key))
-    app.add_handler(CommandHandler("models", cmd_models))
-    app.add_handler(CommandHandler("status", cmd_status))
+    for cmd, fn in [
+        ("start", cmd_start), ("help", cmd_start), ("add", cmd_add),
+        ("remove", cmd_remove), ("list", cmd_list), ("pages", cmd_pages),
+        ("key", cmd_key), ("models", cmd_models), ("listid", cmd_listid),
+        ("status", cmd_status),
+    ]:
+        app.add_handler(CommandHandler(cmd, fn))
 
     app.add_handler(CallbackQueryHandler(callback_page, pattern=r"^page:"))
     app.add_handler(CallbackQueryHandler(callback_deltag, pattern=r"^deltag:"))

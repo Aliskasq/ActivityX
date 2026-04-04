@@ -1,67 +1,72 @@
-"""Main monitoring loop — rotates through accounts, checks for new tweets."""
+"""Main monitoring loop — fetches Twitter list every 30 min."""
 import asyncio
 import logging
-import httpx
 from telegram.ext import Application
 
 import database as db
-from scraper import fetch_nitter_rss, matches_keywords
+from scraper import fetch_list_tweets, matches_keywords
 from ai_processor import process_tweet
 from bot import send_tweet_to_chat
-from config import CHECK_INTERVAL_SEC, TG_CHAT_ID
+from config import CHECK_INTERVAL_SEC, TG_CHAT_ID, TWITTER_LIST_ID
 
 logger = logging.getLogger(__name__)
 
 
 async def monitor_loop(app: Application):
-    """Main loop: rotate through accounts, one per minute."""
+    """Main loop: fetch list tweets every 30 min, filter by per-account tags."""
     logger.info("Monitor loop started")
-    idx = 0
 
-    async with httpx.AsyncClient(
-        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-    ) as client:
-        while True:
-            try:
-                accounts = db.list_accounts()
-                if not accounts:
-                    logger.debug("No accounts to monitor, sleeping...")
-                    await asyncio.sleep(CHECK_INTERVAL_SEC)
+    if not TWITTER_LIST_ID:
+        logger.warning("TWITTER_LIST_ID not set — monitor will wait for it")
+
+    while True:
+        try:
+            if not TWITTER_LIST_ID:
+                await asyncio.sleep(CHECK_INTERVAL_SEC)
+                continue
+
+            logger.info("Fetching Twitter list...")
+            tweets = await fetch_list_tweets()
+
+            if not tweets:
+                logger.info("No tweets fetched (check cookies/list_id)")
+                await asyncio.sleep(CHECK_INTERVAL_SEC)
+                continue
+
+            logger.info(f"Processing {len(tweets)} tweets...")
+            monitored = set(db.list_accounts())
+
+            for tweet in tweets:
+                # Skip already seen
+                if db.is_seen(tweet.tweet_id):
                     continue
 
-                username = accounts[idx % len(accounts)]
-                idx = (idx + 1) % len(accounts)
-
-                logger.info(f"Checking @{username} ({idx}/{len(accounts)})")
-
-                tweets = await fetch_nitter_rss(username, client)
-
-                # Per-account keywords & exclusions (fall back to global keywords)
-                acct_keywords = db.list_account_keywords(username)
-                if not acct_keywords:
-                    acct_keywords = db.list_keywords()
-                acct_exclusions = db.list_account_exclusions(username)
-
-                for tweet in tweets:
-                    if db.is_seen(tweet.tweet_id):
-                        continue
-
-                    if not matches_keywords(tweet, acct_keywords, acct_exclusions):
-                        db.mark_seen(tweet.tweet_id, tweet.username, tweet.text)
-                        continue
-
-                    logger.info(f"New matching tweet from @{username}: {tweet.tweet_id}")
-
-                    ai_result = await process_tweet(tweet.text, tweet.username)
-
-                    chat_id = TG_CHAT_ID
-                    if chat_id:
-                        await send_tweet_to_chat(app, chat_id, username, tweet.url, ai_result)
-
+                # Only process tweets from monitored accounts
+                if tweet.username not in monitored:
                     db.mark_seen(tweet.tweet_id, tweet.username, tweet.text)
-                    await asyncio.sleep(1)
+                    continue
 
-            except Exception as e:
-                logger.error(f"Monitor error: {e}", exc_info=True)
+                # Per-account keywords & exclusions
+                acct_keywords = db.list_account_keywords(tweet.username)
+                acct_exclusions = db.list_account_exclusions(tweet.username)
 
-            await asyncio.sleep(CHECK_INTERVAL_SEC)
+                if not matches_keywords(tweet, acct_keywords, acct_exclusions):
+                    db.mark_seen(tweet.tweet_id, tweet.username, tweet.text)
+                    continue
+
+                logger.info(f"Match! @{tweet.username}: {tweet.tweet_id}")
+
+                # AI processing
+                ai_result = await process_tweet(tweet.text, tweet.username)
+
+                # Send to Telegram
+                if TG_CHAT_ID:
+                    await send_tweet_to_chat(app, TG_CHAT_ID, tweet.username, tweet.url, ai_result)
+
+                db.mark_seen(tweet.tweet_id, tweet.username, tweet.text)
+                await asyncio.sleep(1)  # TG rate limit
+
+        except Exception as e:
+            logger.error(f"Monitor error: {e}", exc_info=True)
+
+        await asyncio.sleep(CHECK_INTERVAL_SEC)
