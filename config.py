@@ -21,5 +21,5 @@ NITTER_INSTANCES = [
 ]
 
 # Monitoring
-CHECK_INTERVAL_SEC = 60  # 1 minute between checks (rotate accounts)
+CHECK_INTERVAL_SEC = 300  # 5 minutes between checks (rotate accounts)
 DB_PATH = os.path.join(os.path.dirname(__file__), "data", "monitor.db")

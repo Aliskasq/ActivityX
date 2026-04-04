@@ -18,7 +18,7 @@ ACCOUNTS = {
         ],
         "exclusions": [],
     },
-    "mexc_official": {
+    "mexc": {
         "tags": ["winners"],
         "exclusions": ["trade", "referral"],
     },
@@ -26,7 +26,7 @@ ACCOUNTS = {
         "tags": ["follow+rt", "giveaway"],
         "exclusions": [],
     },
-    "usaborat": {
+    "usddio": {
         "tags": ["follow+rt", "giveaway", "create"],
         "exclusions": [],
     },
@@ -34,7 +34,7 @@ ACCOUNTS = {
         "tags": ["follow+usdt", "create", "quote"],
         "exclusions": [],
     },
-    "bybit_official": {
+    "bybit_offical": {
         "tags": ["winners+usdt"],
         "exclusions": ["trade"],
     },
