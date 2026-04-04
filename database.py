@@ -1,4 +1,4 @@
-"""SQLite database for accounts, per-account keywords, and seen tweets."""
+"""SQLite database for accounts, per-account keywords/exclusions, and seen tweets."""
 import sqlite3
 import os
 from config import DB_PATH
@@ -32,6 +32,13 @@ def init_db():
             added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(username, keyword)
         );
+        CREATE TABLE IF NOT EXISTS account_exclusions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            word TEXT NOT NULL,
+            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(username, word)
+        );
         CREATE TABLE IF NOT EXISTS seen_tweets (
             tweet_id TEXT PRIMARY KEY,
             username TEXT NOT NULL,
@@ -62,8 +69,8 @@ def remove_account(username: str) -> bool:
     username = username.strip().lstrip("@").lower()
     conn = get_db()
     cur = conn.execute("DELETE FROM accounts WHERE username = ?", (username,))
-    # Also remove account-specific keywords
     conn.execute("DELETE FROM account_keywords WHERE username = ?", (username,))
+    conn.execute("DELETE FROM account_exclusions WHERE username = ?", (username,))
     conn.commit()
     deleted = cur.rowcount > 0
     conn.close()
@@ -77,7 +84,7 @@ def list_accounts() -> list[str]:
     return [r["username"] for r in rows]
 
 
-# --- Global Keywords (legacy, still used as fallback) ---
+# --- Global Keywords (fallback) ---
 
 def add_keyword(word: str) -> bool:
     word = word.strip().lower()
@@ -151,6 +158,50 @@ def list_account_keywords(username: str) -> list[str]:
     ).fetchall()
     conn.close()
     return [r["keyword"] for r in rows]
+
+
+# --- Per-account Exclusions ---
+
+def add_account_exclusion(username: str, word: str) -> bool:
+    username = username.strip().lstrip("@").lower()
+    word = word.strip().lower()
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT INTO account_exclusions (username, word) VALUES (?, ?)",
+            (username, word),
+        )
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+    finally:
+        conn.close()
+
+
+def remove_account_exclusion(username: str, word: str) -> bool:
+    username = username.strip().lstrip("@").lower()
+    word = word.strip().lower()
+    conn = get_db()
+    cur = conn.execute(
+        "DELETE FROM account_exclusions WHERE username = ? AND word = ?",
+        (username, word),
+    )
+    conn.commit()
+    deleted = cur.rowcount > 0
+    conn.close()
+    return deleted
+
+
+def list_account_exclusions(username: str) -> list[str]:
+    username = username.strip().lstrip("@").lower()
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT word FROM account_exclusions WHERE username = ? ORDER BY id",
+        (username,),
+    ).fetchall()
+    conn.close()
+    return [r["word"] for r in rows]
 
 
 # --- Seen tweets ---

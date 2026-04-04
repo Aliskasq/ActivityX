@@ -13,7 +13,7 @@ class Tweet:
     tweet_id: str
     username: str
     text: str
-    url: str  # original twitter/x.com link
+    url: str
     timestamp: str
 
 
@@ -78,20 +78,31 @@ def parse_rss(xml_text: str, username: str) -> list[Tweet]:
     return tweets
 
 
-def matches_keywords(tweet: Tweet, keywords: list[str]) -> bool:
-    """Check if tweet matches any keyword rule.
-    
-    Rules:
+def matches_keywords(tweet: Tweet, keywords: list[str], exclusions: list[str] | None = None) -> bool:
+    """Check if tweet matches keyword rules and doesn't hit exclusions.
+
+    Keywords:
     - "word" → tweet contains "word"
-    - "word1+word2" → tweet contains BOTH "word1" AND "word2"
-    - Empty keywords list → all tweets pass
+    - "word1+word2" → tweet contains BOTH words
+    - Empty list → all tweets pass
+
+    Exclusions:
+    - If tweet contains ANY exclusion word → rejected (even if keywords match)
     """
+    text_lower = tweet.text.lower()
+
+    # Check exclusions first
+    if exclusions:
+        for ex in exclusions:
+            if ex in text_lower:
+                return False
+
+    # Check keywords
     if not keywords:
         return True
-    text_lower = tweet.text.lower()
+
     for kw in keywords:
         if "+" in kw:
-            # Compound: ALL parts must match
             parts = [p.strip() for p in kw.split("+") if p.strip()]
             if parts and all(part in text_lower for part in parts):
                 return True

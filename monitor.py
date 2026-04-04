@@ -29,25 +29,24 @@ async def monitor_loop(app: Application):
                     await asyncio.sleep(CHECK_INTERVAL_SEC)
                     continue
 
-                # Rotate
                 username = accounts[idx % len(accounts)]
                 idx = (idx + 1) % len(accounts)
 
                 logger.info(f"Checking @{username} ({idx}/{len(accounts)})")
 
-                # Fetch tweets
                 tweets = await fetch_nitter_rss(username, client)
 
-                # Get per-account keywords (fall back to global if none set)
+                # Per-account keywords & exclusions (fall back to global keywords)
                 acct_keywords = db.list_account_keywords(username)
                 if not acct_keywords:
                     acct_keywords = db.list_keywords()
+                acct_exclusions = db.list_account_exclusions(username)
 
                 for tweet in tweets:
                     if db.is_seen(tweet.tweet_id):
                         continue
 
-                    if not matches_keywords(tweet, acct_keywords):
+                    if not matches_keywords(tweet, acct_keywords, acct_exclusions):
                         db.mark_seen(tweet.tweet_id, tweet.username, tweet.text)
                         continue
 
