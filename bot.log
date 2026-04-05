@@ -1,0 +1,42 @@
+/data/.openclaw/workspace/twitter-monitor-bot/bot.py:440: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+  tag_conv = ConversationHandler(
+/data/.openclaw/workspace/twitter-monitor-bot/bot.py:450: PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked for every message. Read this FAQ entry to learn more about the per_* settings: https://github.com/python-telegram-bot/python-telegram-bot/wiki/Frequently-Asked-Questions#what-do-the-per_-settings-in-conversationhandler-do.
+  excl_conv = ConversationHandler(
+2026-04-05 17:19:12,170 [INFO] __main__: Starting bot...
+2026-04-05 17:19:12,214 [INFO] httpx: HTTP Request: POST https://api.telegram.org/bot8699812972:AAGTm6EM3Wet5bOFAMCX639hULnsD3kJCl8/getMe "HTTP/1.1 200 OK"
+2026-04-05 17:19:12,217 [INFO] __main__: Bot started, monitor loop launched
+2026-04-05 17:19:12,217 [INFO] monitor: Monitor loop started
+2026-04-05 17:19:12,217 [INFO] monitor: Fetching Twitter list...
+2026-04-05 17:19:12,217 [INFO] scraper: Loaded 13 cookies
+2026-04-05 17:19:12,284 [INFO] httpx: HTTP Request: POST https://api.telegram.org/bot8699812972:AAGTm6EM3Wet5bOFAMCX639hULnsD3kJCl8/deleteWebhook "HTTP/1.1 200 OK"
+2026-04-05 17:19:12,286 [INFO] telegram.ext.Application: Application started
+2026-04-05 17:19:13,035 [INFO] httpx: HTTP Request: GET https://x.com/i/api/graphql/HjsWc-nwwHKYwHenbHm-tw/ListLatestTweetsTimeline?variables=%7B%22listId%22%3A+%222040787100027539704%22%2C+%22count%22%3A+40%7D&features=%7B%22rweb_tipjar_consumption_enabled%22%3A+true%2C+%22responsive_web_graphql_exclude_directive_enabled%22%3A+true%2C+%22verified_phone_label_enabled%22%3A+false%2C+%22responsive_web_graphql_timeline_navigation_enabled%22%3A+true%2C+%22responsive_web_graphql_skip_user_profile_image_extensions_enabled%22%3A+false%2C+%22creator_subscriptions_tweet_preview_api_enabled%22%3A+true%2C+%22communities_web_enable_tweet_community_results_enabled%22%3A+true%2C+%22c9s_tweet_anatomy_moderator_badge_enabled%22%3A+true%2C+%22articles_preview_enabled%22%3A+true%2C+%22responsive_web_edit_tweet_api_enabled%22%3A+true%2C+%22graphql_is_translatable_rweb_tweet_is_translatable_enabled%22%3A+true%2C+%22view_counts_everywhere_api_enabled%22%3A+true%2C+%22longform_notetweets_consumption_enabled%22%3A+true%2C+%22responsive_web_twitter_article_tweet_consumption_enabled%22%3A+true%2C+%22tweet_awards_web_tipping_enabled%22%3A+false%2C+%22creator_subscriptions_quote_tweet_preview_enabled%22%3A+false%2C+%22freedom_of_speech_not_reach_fetch_enabled%22%3A+true%2C+%22standardized_nudges_misinfo%22%3A+true%2C+%22tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled%22%3A+true%2C+%22rweb_video_timestamps_enabled%22%3A+true%2C+%22longform_notetweets_rich_text_read_enabled%22%3A+true%2C+%22longform_notetweets_inline_media_enabled%22%3A+true%2C+%22responsive_web_enhance_cards_enabled%22%3A+false%7D "HTTP/1.1 200 OK"
+2026-04-05 17:19:13,170 [INFO] scraper: Got 79 tweets from list 2040787100027539704
+2026-04-05 17:19:13,171 [INFO] monitor: Processing 79 tweets...
+2026-04-05 17:19:13,290 [INFO] monitor: Match! @binance: 2040363135526425080
+2026-04-05 17:19:13,566 [INFO] httpx: HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 400 Bad Request"
+2026-04-05 17:19:13,567 [ERROR] ai_processor: OpenRouter error: Client error '400 Bad Request' for url 'https://openrouter.ai/api/v1/chat/completions'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400
+2026-04-05 17:19:13,619 [INFO] httpx: HTTP Request: POST https://api.telegram.org/bot8699812972:AAGTm6EM3Wet5bOFAMCX639hULnsD3kJCl8/sendMessage "HTTP/1.1 200 OK"
+2026-04-05 17:19:14,626 [INFO] monitor: Match! @htx_global: 2040361231945474352
+2026-04-05 17:19:14,863 [INFO] httpx: HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 400 Bad Request"
+2026-04-05 17:19:14,865 [ERROR] ai_processor: OpenRouter error: Client error '400 Bad Request' for url 'https://openrouter.ai/api/v1/chat/completions'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400
+2026-04-05 17:19:14,925 [INFO] httpx: HTTP Request: POST https://api.telegram.org/bot8699812972:AAGTm6EM3Wet5bOFAMCX639hULnsD3kJCl8/sendMessage "HTTP/1.1 200 OK"
+2026-04-05 17:19:15,935 [INFO] monitor: Match! @mexc: 2040338585086484485
+2026-04-05 17:19:16,038 [INFO] httpx: HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 400 Bad Request"
+2026-04-05 17:19:16,039 [ERROR] ai_processor: OpenRouter error: Client error '400 Bad Request' for url 'https://openrouter.ai/api/v1/chat/completions'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400
+2026-04-05 17:19:16,146 [INFO] httpx: HTTP Request: POST https://api.telegram.org/bot8699812972:AAGTm6EM3Wet5bOFAMCX639hULnsD3kJCl8/sendMessage "HTTP/1.1 200 OK"
+2026-04-05 17:19:17,212 [INFO] monitor: Match! @binanceafrica: 2040148521420988445
+2026-04-05 17:19:17,339 [INFO] httpx: HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 400 Bad Request"
+2026-04-05 17:19:17,340 [ERROR] ai_processor: OpenRouter error: Client error '400 Bad Request' for url 'https://openrouter.ai/api/v1/chat/completions'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400
+2026-04-05 17:19:17,396 [INFO] httpx: HTTP Request: POST https://api.telegram.org/bot8699812972:AAGTm6EM3Wet5bOFAMCX639hULnsD3kJCl8/sendMessage "HTTP/1.1 200 OK"
+2026-04-05 17:19:18,423 [INFO] monitor: Match! @binance: 2040067857157861477
+2026-04-05 17:19:18,502 [INFO] httpx: HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 400 Bad Request"
+2026-04-05 17:19:18,503 [ERROR] ai_processor: OpenRouter error: Client error '400 Bad Request' for url 'https://openrouter.ai/api/v1/chat/completions'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400
+2026-04-05 17:19:18,666 [INFO] httpx: HTTP Request: POST https://api.telegram.org/bot8699812972:AAGTm6EM3Wet5bOFAMCX639hULnsD3kJCl8/sendMessage "HTTP/1.1 200 OK"
+2026-04-05 17:19:22,329 [INFO] httpx: HTTP Request: POST https://api.telegram.org/bot8699812972:AAGTm6EM3Wet5bOFAMCX639hULnsD3kJCl8/getUpdates "HTTP/1.1 200 OK"
+2026-04-05 17:19:32,345 [INFO] httpx: HTTP Request: POST https://api.telegram.org/bot8699812972:AAGTm6EM3Wet5bOFAMCX639hULnsD3kJCl8/getUpdates "HTTP/1.1 200 OK"

@@ -13,6 +13,7 @@ from telegram.ext import (
     filters,
 )
 from config import ADMIN_IDS, COOKIES_PATH, get_api_key, set_api_key, get_model, set_model
+from scraper import _normalize_cookies
 import database as db
 
 logger = logging.getLogger(__name__)
@@ -126,24 +127,43 @@ async def cmd_cookies(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     return WAITING_COOKIES
 
 
-async def receive_cookies(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if not ctx.user_data.get("waiting_cookies"):
+async def receive_cookies_file(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Handle cookie file upload (document)."""
+    if not is_admin(update.effective_user.id):
         return ConversationHandler.END
-    text = update.message.text.strip()
-
-    # Handle file
-    if update.message.document:
+    try:
         file = await update.message.document.get_file()
         await file.download_to_drive(COOKIES_PATH)
+        # Validate JSON
+        with open(COOKIES_PATH) as f:
+            json.loads(f.read())
+        _normalize_cookies(COOKIES_PATH)
         ctx.user_data.pop("waiting_cookies", None)
         from scraper import reset_client
         reset_client()
-        return await update.message.reply_text("✅ Куки сохранены!")
+        await update.message.reply_text("✅ Куки сохранены! Клиент перезапущен.")
+    except json.JSONDecodeError:
+        await update.message.reply_text("❌ Файл не содержит валидный JSON. Попробуй ещё раз.")
+        return WAITING_COOKIES
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка: {e}")
+        return WAITING_COOKIES
+    return ConversationHandler.END
 
+
+async def receive_cookies(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Handle cookie text message."""
+    if not is_admin(update.effective_user.id):
+        return ConversationHandler.END
+    text = (update.message.text or "").strip()
+    if not text:
+        await update.message.reply_text("❌ Пустое сообщение. Отправь JSON или файл.")
+        return WAITING_COOKIES
     try:
         json.loads(text)
         with open(COOKIES_PATH, "w") as f:
             f.write(text)
+        _normalize_cookies(COOKIES_PATH)
         ctx.user_data.pop("waiting_cookies", None)
         from scraper import reset_client
         reset_client()
@@ -170,10 +190,12 @@ async def cmd_listid(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # Save to .env
     from config import _save_env
     _save_env("TWITTER_LIST_ID", list_id)
-    # Update runtime
+    # Update runtime — no restart needed
     import config
+    import monitor
     config.TWITTER_LIST_ID = list_id
-    await update.message.reply_text(f"✅ List ID: `{list_id}`\n\n⚠️ Перезапусти бота чтобы применить.", parse_mode="Markdown")
+    monitor.TWITTER_LIST_ID = list_id
+    await update.message.reply_text(f"✅ List ID: `{list_id}` — применён!", parse_mode="Markdown")
 
 
 # --- Key management ---
@@ -407,8 +429,8 @@ def setup_handlers(app: Application):
         states={
             WAITING_COOKIES: [
                 CommandHandler("cancel", cancel_input),
+                MessageHandler(filters.Document.ALL, receive_cookies_file),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_cookies),
-                MessageHandler(filters.Document.ALL, receive_cookies),
             ],
         },
         fallbacks=[CommandHandler("cancel", cancel_input)],
