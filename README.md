@@ -1,88 +1,73 @@
 # 🐦 Twitter Monitor Bot
 
-Мониторинг Twitter/X аккаунтов через Nitter с AI-обработкой и отправкой в Telegram.
+Мониторинг Twitter/X через приватный список с AI-обработкой и отправкой в Telegram.
 
-## Возможности
+## Как работает
 
-- Мониторинг 20+ Twitter аккаунтов по очереди (1 аккаунт в минуту)
-- Фильтрация по ключевым словам (giveaway, airdrop и т.д.)
-- AI-перевод и анализ через OpenRouter (перевод на русский, выделение заданий)
-- Кнопка "Открыть в X" на каждом сообщении
-- Управление через Telegram команды
+1. Ты создаёшь **приватный список** в Twitter и добавляешь туда аккаунты
+2. Бот раз в 30 мин загружает ленту этого списка через куки (twikit)
+3. Каждый твит фильтруется по тегам/исключениям для конкретного аккаунта
+4. Совпавшие твиты проходят AI-обработку (перевод + анализ) и отправляются в Telegram
+
+## Быстрый старт
+
+### 1. Подготовка Twitter (на ПК или планшете)
+
+- Зайди в Twitter через браузер (Chrome / Firefox)
+- Создай **приватный список** → добавь нужных юзеров
+- Запомни List ID из URL: `https://x.com/i/lists/123456789` → `123456789`
+
+### 2. Получение куки
+
+**На ПК (Chrome/Firefox):**
+- Установи расширение **Cookie-Editor**
+- Зайди на x.com → нажми на расширение → **Export** (JSON)
+- Скинь боту через `/cookies` (текстом или файлом)
+
+**На Android:**
+- Используй **Kiwi Browser** (поддерживает расширения Chrome)
+- Установи Cookie-Editor из Chrome Web Store
+- Зайди на x.com → экспортируй куки → скопируй → отправь боту
+
+### 3. Настройка бота
+
+```bash
+cp .env.example .env
+# Заполни: TG_BOT_TOKEN, TG_CHAT_ID, ADMIN_IDS, TWITTER_LIST_ID
+```
+
+### 4. Запуск
+
+```bash
+pip install -r requirements.txt
+python main.py
+```
 
 ## Команды бота
 
 | Команда | Описание |
 |---------|----------|
-| `/add @username` | Добавить аккаунт в мониторинг |
+| `/start` | Справка |
+| `/add @username` | Добавить аккаунт (фильтр) |
 | `/remove @username` | Удалить аккаунт |
-| `/list` | Список всех аккаунтов с тегами |
-| `/pages` | Управление тегами по аккаунтам (кнопки) |
-| `/addkw слово` | Глобальное ключевое слово |
-| `/rmkw слово` | Удалить глобальное слово |
-| `/keywords` | Глобальные ключевые слова |
-| `/status` | Статус мониторинга |
+| `/list` | Список аккаунтов с тегами |
+| `/pages` | Управление тегами (кнопки) |
+| `/cookies` | Загрузить куки Twitter |
+| `/listid ID` | Установить ID списка |
+| `/key ключ` | Сменить OpenRouter API ключ |
+| `/models` | Список моделей / сменить |
+| `/status` | Статус |
 
 ## Теги (фильтры)
 
-Каждый аккаунт может иметь свои теги. Твит проходит фильтр если совпадает хотя бы один тег.
+Каждый аккаунт имеет свои теги. Твит проходит если совпал хотя бы один:
 
-- `giveaway` — твит содержит слово "giveaway"
-- `follow+repost` — твит содержит И "follow" И "repost" (оба обязательны)
-- `share+usdt` — И "share" И "usdt"
+- `giveaway` — содержит слово "giveaway"
+- `follow+repost` — содержит И "follow" И "repost"
+- Исключения: если твит содержит слово-исключение → отклоняется
 
-Управление через `/pages` → выбрать аккаунт → добавить/удалить теги.
+Управление: `/pages` → аккаунт → добавить/удалить теги и исключения.
 
-Если у аккаунта нет тегов — используются глобальные (`/addkw`). Если и глобальных нет — все твиты проходят.
+## Куки
 
-## Установка
-
-```bash
-# 1. Клонируй или скопируй файлы на VPS
-# 2. Создай виртуальное окружение
-python3 -m venv venv
-source venv/bin/activate
-
-# 3. Установи зависимости
-pip install -r requirements.txt
-
-# 4. Скопируй и заполни .env
-cp .env.example .env
-nano .env
-
-# 5. Запусти
-python main.py
-```
-
-## Запуск как сервис (systemd)
-
-```bash
-sudo nano /etc/systemd/system/twitter-monitor.service
-```
-
-```ini
-[Unit]
-Description=Twitter Monitor Bot
-After=network.target
-
-[Service]
-Type=simple
-User=your_user
-WorkingDirectory=/path/to/twitter-monitor-bot
-ExecStart=/path/to/twitter-monitor-bot/venv/bin/python main.py
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-sudo systemctl enable twitter-monitor
-sudo systemctl start twitter-monitor
-```
-
-## Как получить TG_CHAT_ID
-
-1. Напиши боту `/start`
-2. Или перешли сообщение из нужного чата боту @userinfobot
+Куки протухают примерно раз в несколько недель. Когда бот перестанет получать твиты — просто повтори экспорт и скинь через `/cookies`.
