@@ -35,6 +35,7 @@ async def monitor_loop(app: Application):
 
             logger.info(f"Processing {len(tweets)} tweets...")
             monitored = set(db.list_accounts())
+            matched = []
 
             for tweet in tweets:
                 # Skip already seen
@@ -55,16 +56,20 @@ async def monitor_loop(app: Application):
                     continue
 
                 logger.info(f"Match! @{tweet.username}: {tweet.tweet_id}")
-
-                # AI processing
-                ai_result = await process_tweet(tweet.text, tweet.username)
-
-                # Send to Telegram
-                if TG_CHAT_ID:
-                    await send_tweet_to_chat(app, TG_CHAT_ID, tweet.username, tweet.url, ai_result)
-
+                matched.append(tweet)
                 db.mark_seen(tweet.tweet_id, tweet.username, tweet.text)
-                await asyncio.sleep(1)  # TG rate limit
+
+            # Process matched tweets one by one (queue)
+            if matched:
+                logger.info(f"Processing {len(matched)} matched tweets through AI...")
+            for tweet in matched:
+                try:
+                    ai_result = await process_tweet(tweet.text, tweet.username)
+                    if TG_CHAT_ID:
+                        await send_tweet_to_chat(app, TG_CHAT_ID, tweet.username, tweet.url, ai_result)
+                    await asyncio.sleep(3)  # Rate limit: AI + TG
+                except Exception as e:
+                    logger.error(f"Error processing @{tweet.username}/{tweet.tweet_id}: {e}")
 
         except Exception as e:
             logger.error(f"Monitor error: {e}", exc_info=True)

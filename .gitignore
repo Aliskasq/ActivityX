@@ -6,3 +6,4 @@ nohup.out
 cookies.json
 bot.log
 *.pyc
+data/monitor.db

@@ -5,13 +5,14 @@
 ## Как работает
 
 1. Ты создаёшь **приватный список** в Twitter и добавляешь туда аккаунты
-2. Бот раз в 30 мин загружает ленту этого списка через куки (twikit)
+2. Бот раз в 30 мин загружает ленту этого списка через куки (GraphQL API)
 3. Каждый твит фильтруется по тегам/исключениям для конкретного аккаунта
-4. Совпавшие твиты проходят AI-обработку (перевод + анализ) и отправляются в Telegram
+4. Совпавшие твиты ставятся в очередь → AI-обработка (перевод + анализ) → отправка в Telegram
+5. Дубли не отправляются (каждый tweet_id сохраняется в SQLite)
 
 ## Быстрый старт
 
-### 1. Подготовка Twitter (на ПК или планшете)
+### 1. Подготовка Twitter
 
 - Зайди в Twitter через браузер (Chrome / Firefox)
 - Создай **приватный список** → добавь нужных юзеров
@@ -25,22 +26,62 @@
 - Скинь боту через `/cookies` (текстом или файлом)
 
 **На Android:**
-- Используй **Kiwi Browser** (поддерживает расширения Chrome)
-- Установи Cookie-Editor из Chrome Web Store
-- Зайди на x.com → экспортируй куки → скопируй → отправь боту
+- Используй **Firefox** (поддерживает расширения) или любое приложение для экспорта куки
+- Экспортируй куки x.com → отправь боту через `/cookies`
 
-### 3. Настройка бота
+### 3. Установка
 
 ```bash
+git clone https://github.com/Aliskasq/ActivityX.git
+cd ActivityX
+
+pip install -r requirements.txt
+
 cp .env.example .env
-# Заполни: TG_BOT_TOKEN, TG_CHAT_ID, ADMIN_IDS, TWITTER_LIST_ID
+nano .env  # заполни ключи
 ```
 
 ### 4. Запуск
 
 ```bash
-pip install -r requirements.txt
-python main.py
+python3 main.py
+```
+
+### 5. Systemd (автозапуск)
+
+```bash
+sudo nano /etc/systemd/system/twitter-monitor.service
+```
+
+```ini
+[Unit]
+Description=Twitter Monitor Bot
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/ActivityX
+ExecStart=/usr/bin/python3 /root/ActivityX/main.py
+Restart=always
+RestartSec=15
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+# Активировать и запустить
+sudo systemctl daemon-reload
+sudo systemctl enable twitter-monitor
+sudo systemctl start twitter-monitor
+
+# Проверить статус
+sudo systemctl status twitter-monitor
+
+# Логи
+sudo journalctl -u twitter-monitor -f
 ```
 
 ## Команды бота
@@ -51,8 +92,8 @@ python main.py
 | `/add @username` | Добавить аккаунт (фильтр) |
 | `/remove @username` | Удалить аккаунт |
 | `/list` | Список аккаунтов с тегами |
-| `/pages` | Управление тегами (кнопки) |
-| `/cookies` | Загрузить куки Twitter |
+| `/pages` | Управление тегами (inline кнопки) |
+| `/cookies` | Загрузить куки Twitter (текст или файл) |
 | `/listid ID` | Установить ID списка |
 | `/key ключ` | Сменить OpenRouter API ключ |
 | `/models` | Список моделей / сменить |
@@ -60,14 +101,20 @@ python main.py
 
 ## Теги (фильтры)
 
-Каждый аккаунт имеет свои теги. Твит проходит если совпал хотя бы один:
+Каждый аккаунт имеет свои теги и исключения. Управление через `/pages`:
 
 - `giveaway` — содержит слово "giveaway"
-- `follow+repost` — содержит И "follow" И "repost"
+- `follow+repost` — содержит И "follow" И "repost" (составной тег)
 - Исключения: если твит содержит слово-исключение → отклоняется
-
-Управление: `/pages` → аккаунт → добавить/удалить теги и исключения.
 
 ## Куки
 
-Куки протухают примерно раз в несколько недель. Когда бот перестанет получать твиты — просто повтори экспорт и скинь через `/cookies`.
+Куки протухают примерно раз в несколько недель. Когда бот перестанет получать твиты — повтори экспорт и скинь через `/cookies`. Бот принимает любой формат (массив объектов, обёрнутый JSON, простой dict).
+
+## Стек
+
+- Python 3.10+
+- python-telegram-bot 21.x
+- httpx (прямые запросы к Twitter GraphQL API)
+- SQLite (хранение аккаунтов, тегов, seen tweets)
+- OpenRouter (AI перевод/анализ, бесплатная модель stepfun)
