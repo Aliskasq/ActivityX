@@ -219,30 +219,54 @@ async def cmd_key(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 # --- Models ---
 
-async def _fetch_free_models() -> list[dict]:
-    """Fetch free models from OpenRouter API."""
+async def _fetch_all_models() -> tuple[list[dict], list[dict]]:
+    """Fetch all models from OpenRouter API, split into free and paid."""
     import httpx
     try:
         async with httpx.AsyncClient() as client:
             r = await client.get("https://openrouter.ai/api/v1/models", timeout=15)
             r.raise_for_status()
             data = r.json()
-        models = []
+        free = []
+        paid = []
         for m in data.get("data", []):
             pricing = m.get("pricing", {})
             prompt_cost = float(pricing.get("prompt", "1") or "1")
             completion_cost = float(pricing.get("completion", "1") or "1")
+            info = {
+                "id": m["id"],
+                "name": m.get("name", m["id"]),
+                "context": m.get("context_length", 0),
+                "price_in": prompt_cost,
+                "price_out": completion_cost,
+            }
             if prompt_cost == 0 and completion_cost == 0:
-                models.append({
-                    "id": m["id"],
-                    "name": m.get("name", m["id"]),
-                    "context": m.get("context_length", 0),
-                })
-        models.sort(key=lambda x: x["name"].lower())
-        return models
+                free.append(info)
+            else:
+                paid.append(info)
+        free.sort(key=lambda x: x["name"].lower())
+        paid.sort(key=lambda x: x["name"].lower())
+        return free, paid
     except Exception as e:
         logger.error(f"Failed to fetch models: {e}")
-        return []
+        return [], []
+
+
+def _build_model_chunks(models: list[dict], header: str, current: str, show_price: bool = False) -> list[str]:
+    """Build message chunks from model list."""
+    chunks = [header]
+    for i, m in enumerate(models, 1):
+        marker = "👉 " if m["id"] == current else ""
+        ctx_k = m["context"] // 1000 if m["context"] else "?"
+        if show_price:
+            price = f"${m['price_in']*1000:.2f}/{m['price_out']*1000:.2f} per 1K"
+            line = f"{i}. {marker}`{m['id']}`\n    {m['name']} ({ctx_k}k) — {price}\n"
+        else:
+            line = f"{i}. {marker}`{m['id']}`\n    {m['name']} ({ctx_k}k)\n"
+        if len(chunks[-1]) + len(line) > 3800:
+            chunks.append("")
+        chunks[-1] += line
+    return chunks
 
 
 async def cmd_models(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -255,27 +279,26 @@ async def cmd_models(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text("⏳ Загружаю список моделей...")
 
-    models = await _fetch_free_models()
-    if not models:
+    free, paid = await _fetch_all_models()
+    if not free and not paid:
         return await update.message.reply_text("❌ Не удалось загрузить список моделей")
 
     current = get_model()
-    header = f"🤖 **Текущая модель:** `{current}`\n\n🆓 **Бесплатные модели ({len(models)}):**\n\n"
 
-    # Split into messages (TG limit ~4096 chars)
-    chunks = [header]
-    for i, m in enumerate(models, 1):
-        marker = "👉 " if m["id"] == current else ""
-        ctx_k = m["context"] // 1000 if m["context"] else "?"
-        line = f"{i}. {marker}`{m['id']}`\n    {m['name']} ({ctx_k}k)\n"
-        if len(chunks[-1]) + len(line) > 3800:
-            chunks.append("")
-        chunks[-1] += line
+    # Free models
+    if free:
+        header = f"🤖 **Текущая:** `{current}`\n\n🆓 **Бесплатные ({len(free)}):**\n\n"
+        chunks = _build_model_chunks(free, header, current)
+        chunks[-1] += f"\nСменить: `/models название`"
+        for chunk in chunks:
+            await update.message.reply_text(chunk, parse_mode="Markdown")
 
-    chunks[-1] += f"\nСменить: `/models название`"
-
-    for chunk in chunks:
-        await update.message.reply_text(chunk, parse_mode="Markdown")
+    # Paid models
+    if paid:
+        header = f"💰 **Платные ({len(paid)}):**\n\n"
+        chunks = _build_model_chunks(paid, header, current, show_price=True)
+        for chunk in chunks:
+            await update.message.reply_text(chunk, parse_mode="Markdown")
 
 
 # --- Pages ---
