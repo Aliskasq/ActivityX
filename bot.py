@@ -12,7 +12,11 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
-from config import ADMIN_IDS, COOKIES_PATH, get_api_key, set_api_key, get_model, set_model
+from config import (
+    ADMIN_IDS, COOKIES_PATH, get_api_key, set_api_key, get_model, set_model,
+    get_schedule_mode, get_schedule_times, get_interval_min,
+    set_schedule_times, set_interval_mode,
+)
 from scraper import _normalize_cookies
 import database as db
 
@@ -46,6 +50,8 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/listid `ID` — установить ID списка Twitter\n"
         "/key `ключ` — сменить OpenRouter API ключ\n"
         "/models — список моделей / сменить\n"
+        "/time `18:05 20:49` — расписание скана (МСК)\n"
+        "/time30 — сканить каждые 30 мин\n"
         "/status — статус",
         parse_mode="Markdown",
     )
@@ -395,6 +401,69 @@ async def callback_noop(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
 
 
+# --- Time/Schedule ---
+
+async def cmd_time(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        return
+
+    if not ctx.args:
+        # Show current schedule
+        mode = get_schedule_mode()
+        if mode == "interval":
+            return await update.message.reply_text(
+                f"⏰ **Режим:** каждые {get_interval_min()} мин\n\n"
+                f"**Задать расписание (МСК):**\n"
+                f"`/time 18:05 18:38 20:49 03:00`\n\n"
+                f"**Вернуть интервал:**\n"
+                f"`/time30` — каждые 30 мин",
+                parse_mode="Markdown",
+            )
+        else:
+            times = get_schedule_times()
+            times_str = "  ".join(times) if times else "—"
+            return await update.message.reply_text(
+                f"⏰ **Режим:** расписание (МСК)\n"
+                f"**Время:** `{times_str}`\n\n"
+                f"**Изменить:**\n"
+                f"`/time 18:05 20:00 03:00`\n\n"
+                f"**Вернуть интервал:**\n"
+                f"`/time30` — каждые 30 мин",
+                parse_mode="Markdown",
+            )
+
+    # Parse times
+    import re
+    times = []
+    for arg in ctx.args:
+        arg = arg.strip()
+        if re.match(r"^\d{1,2}:\d{2}$", arg):
+            times.append(arg)
+        else:
+            return await update.message.reply_text(
+                f"❌ Неверный формат: `{arg}`\nИспользуй: `/time 18:05 20:49 03:00`",
+                parse_mode="Markdown",
+            )
+
+    if not times:
+        return await update.message.reply_text("❌ Укажи хотя бы одно время")
+
+    set_schedule_times(times)
+    times_str = "  ".join(times)
+    await update.message.reply_text(
+        f"✅ Расписание (МСК): `{times_str}`\n"
+        f"Скан будет в указанное время.",
+        parse_mode="Markdown",
+    )
+
+
+async def cmd_time30(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        return
+    set_interval_mode(30)
+    await update.message.reply_text("✅ Режим: каждые 30 мин")
+
+
 # --- Status ---
 
 async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -403,13 +472,19 @@ async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     accounts = db.list_accounts()
     from config import TWITTER_LIST_ID
     has_cookies = os.path.exists(COOKIES_PATH)
+    mode = get_schedule_mode()
+    if mode == "interval":
+        schedule_str = f"каждые {get_interval_min()} мин"
+    else:
+        times = get_schedule_times()
+        schedule_str = f"МСК: {', '.join(times)}" if times else "не задано"
     await update.message.reply_text(
         f"📊 **Статус**\n\n"
         f"Аккаунтов: {len(accounts)}\n"
         f"Куки: {'✅' if has_cookies else '❌'}\n"
         f"List ID: `{TWITTER_LIST_ID or 'не установлен'}`\n"
         f"Модель: `{get_model()}`\n"
-        f"Интервал: 30 мин",
+        f"Расписание: {schedule_str}",
         parse_mode="Markdown",
     )
 
@@ -465,7 +540,7 @@ def setup_handlers(app: Application):
         ("start", cmd_start), ("help", cmd_start), ("add", cmd_add),
         ("remove", cmd_remove), ("list", cmd_list), ("pages", cmd_pages),
         ("key", cmd_key), ("models", cmd_models), ("listid", cmd_listid),
-        ("status", cmd_status),
+        ("status", cmd_status), ("time", cmd_time), ("time30", cmd_time30),
     ]:
         app.add_handler(CommandHandler(cmd, fn))
 
