@@ -48,6 +48,11 @@ class Tweet:
     text: str
     url: str
     timestamp: str
+    images: list[str] = None  # List of image URLs
+
+    def __post_init__(self):
+        if self.images is None:
+            self.images = []
 
 
 def _load_cookies() -> dict | None:
@@ -140,6 +145,17 @@ def _parse_tweets(data: dict) -> list[Tweet]:
                 note = result.get("note_tweet", {}).get("note_tweet_results", {}).get("result", {})
                 text = note.get("text", "") or legacy.get("full_text", "")
                 created_at = legacy.get("created_at", "")
+                # Extract images
+                images = []
+                media_list = legacy.get("entities", {}).get("media", [])
+                if not media_list:
+                    media_list = legacy.get("extended_entities", {}).get("media", [])
+                for media in media_list:
+                    if media.get("type") == "photo":
+                        img_url = media.get("media_url_https", "")
+                        if img_url:
+                            images.append(img_url)
+
                 if tweet_id:
                     tweets.append(Tweet(
                         tweet_id=tweet_id,
@@ -147,6 +163,7 @@ def _parse_tweets(data: dict) -> list[Tweet]:
                         text=text,
                         url=f"https://x.com/{username}/status/{tweet_id}",
                         timestamp=created_at,
+                        images=images,
                     ))
     except (KeyError, TypeError) as e:
         logger.error(f"Error parsing tweets: {e}")
