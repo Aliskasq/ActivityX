@@ -17,16 +17,10 @@ OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "stepfun/step-2-16k")
 TWITTER_LIST_ID = os.getenv("TWITTER_LIST_ID", "")
 COOKIES_PATH = os.path.join(os.path.dirname(__file__), "cookies.json")
 
-# Schedule mode: "interval" (every N min) or "schedule" (specific MSK times)
-SCHEDULE_TIMES_MSK = os.getenv("SCHEDULE_TIMES_MSK", "")  # e.g. "18:05,18:38,20:49,03:00"
-
 # Runtime-mutable settings
 _runtime = {
     "api_key": OPENROUTER_API_KEY,
     "model": OPENROUTER_MODEL,
-    "schedule_mode": "schedule" if SCHEDULE_TIMES_MSK else "interval",  # "interval" or "schedule"
-    "schedule_times": [t.strip() for t in SCHEDULE_TIMES_MSK.split(",") if t.strip()],
-    "interval_min": 30,
 }
 
 
@@ -49,28 +43,29 @@ def set_model(model: str):
 
 
 def get_schedule_mode() -> str:
-    return _runtime["schedule_mode"]
+    from database import get_setting
+    times = get_setting("schedule_times", "")
+    return "schedule" if times else "interval"
 
 
 def get_schedule_times() -> list[str]:
-    return _runtime["schedule_times"]
+    from database import get_setting
+    raw = get_setting("schedule_times", "")
+    return [t.strip() for t in raw.split(",") if t.strip()] if raw else []
 
 
 def get_interval_min() -> int:
-    return _runtime["interval_min"]
+    return 30
 
 
 def set_schedule_times(times: list[str]):
-    _runtime["schedule_mode"] = "schedule"
-    _runtime["schedule_times"] = times
-    _save_env("SCHEDULE_TIMES_MSK", ",".join(times))
+    from database import set_setting
+    set_setting("schedule_times", ",".join(times))
 
 
-def set_interval_mode(minutes: int = 30):
-    _runtime["schedule_mode"] = "interval"
-    _runtime["interval_min"] = minutes
-    _runtime["schedule_times"] = []
-    _save_env("SCHEDULE_TIMES_MSK", "")
+def set_interval_mode():
+    from database import set_setting
+    set_setting("schedule_times", "")
 
 
 def _save_env(key: str, value: str):

@@ -14,6 +14,9 @@ logger = logging.getLogger(__name__)
 
 MSK = timezone(timedelta(hours=3))
 
+# Track error state to avoid spamming
+_last_error_notified: str | None = None
+
 
 def _seconds_until_next_run() -> float:
     """Calculate seconds until the next scheduled run."""
@@ -49,6 +52,25 @@ def _seconds_until_next_run() -> float:
     return max(delta, 10)  # minimum 10 sec safety
 
 
+async def _notify_error(app: Application, error_key: str, message: str):
+    """Send error notification to TG (once per error type, no spam)."""
+    global _last_error_notified
+    if _last_error_notified == error_key:
+        return  # already notified about this
+    _last_error_notified = error_key
+    if TG_CHAT_ID:
+        try:
+            await app.bot.send_message(chat_id=TG_CHAT_ID, text=message)
+        except Exception as e:
+            logger.error(f"Failed to send error notification: {e}")
+
+
+async def _clear_error():
+    """Clear error state after successful fetch."""
+    global _last_error_notified
+    _last_error_notified = None
+
+
 async def monitor_loop(app: Application):
     """Main loop: fetch list tweets on schedule, filter by per-account tags."""
     logger.info("Monitor loop started")
@@ -63,15 +85,28 @@ async def monitor_loop(app: Application):
                 continue
 
             logger.info("Fetching Twitter list...")
-            tweets = await fetch_list_tweets()
+            try:
+                tweets = await fetch_list_tweets()
+            except Exception as e:
+                error_msg = str(e).lower()
+                if "cookie" in error_msg or "401" in error_msg or "403" in error_msg:
+                    await _notify_error(app, "cookies", "🚨 Куки Twitter протухли! Обнови через /cookies")
+                else:
+                    await _notify_error(app, "fetch", f"🚨 Ошибка загрузки Twitter: {e}")
+                logger.error(f"Fetch error: {e}", exc_info=True)
+                wait = _seconds_until_next_run()
+                await asyncio.sleep(wait)
+                continue
 
             if not tweets:
                 logger.info("No tweets fetched (check cookies/list_id)")
+                await _notify_error(app, "empty", "⚠️ Twitter вернул 0 твитов — возможно куки протухли. Проверь /cookies")
                 wait = _seconds_until_next_run()
                 logger.info(f"Next check in {wait/60:.1f} min")
                 await asyncio.sleep(wait)
                 continue
 
+            await _clear_error()
             logger.info(f"Processing {len(tweets)} tweets...")
             monitored = set(db.list_accounts())
             matched = []
@@ -108,6 +143,7 @@ async def monitor_loop(app: Application):
 
         except Exception as e:
             logger.error(f"Monitor error: {e}", exc_info=True)
+            await _notify_error(app, "crash", f"🚨 Монитор упал: {e}")
 
         wait = _seconds_until_next_run()
         logger.info(f"Next check in {wait/60:.1f} min")

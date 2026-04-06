@@ -460,7 +460,7 @@ async def cmd_time(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def cmd_time30(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return
-    set_interval_mode(30)
+    set_interval_mode()
     await update.message.reply_text("✅ Режим: каждые 30 мин")
 
 

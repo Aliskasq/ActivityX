@@ -45,6 +45,10 @@ def init_db():
             text TEXT,
             seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
     """)
     conn.commit()
     conn.close()
@@ -218,6 +222,25 @@ def mark_seen(tweet_id: str, username: str, text: str):
     conn.execute(
         "INSERT OR IGNORE INTO seen_tweets (tweet_id, username, text) VALUES (?, ?, ?)",
         (tweet_id, username, text),
+    )
+    conn.commit()
+    conn.close()
+
+
+# --- Settings (key-value) ---
+
+def get_setting(key: str, default: str = "") -> str:
+    conn = get_db()
+    row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    conn.close()
+    return row["value"] if row else default
+
+
+def set_setting(key: str, value: str):
+    conn = get_db()
+    conn.execute(
+        "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+        (key, value),
     )
     conn.commit()
     conn.close()
