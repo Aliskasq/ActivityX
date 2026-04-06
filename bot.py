@@ -259,8 +259,9 @@ def _build_model_chunks(models: list[dict], header: str, current: str, show_pric
         marker = "👉 " if m["id"] == current else ""
         ctx_k = m["context"] // 1000 if m["context"] else "?"
         if show_price:
-            price = f"${m['price_in']*1000:.2f}/{m['price_out']*1000:.2f} per 1K"
-            line = f"{i}. {marker}`{m['id']}`\n    {m['name']} ({ctx_k}k) — {price}\n"
+            p_in = m['price_in'] * 1_000_000
+            p_out = m['price_out'] * 1_000_000
+            line = f"{i}. {marker}`{m['id']}`\n    {m['name']} ({ctx_k}k) — ${p_in:.2f}/${p_out:.2f} per 1M tok\n"
         else:
             line = f"{i}. {marker}`{m['id']}`\n    {m['name']} ({ctx_k}k)\n"
         if len(chunks[-1]) + len(line) > 3800:
