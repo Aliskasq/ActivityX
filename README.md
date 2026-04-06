@@ -35,8 +35,14 @@
 git clone https://github.com/Aliskasq/ActivityX.git
 cd ActivityX
 
+# Создать виртуальное окружение
+python3 -m venv venv
+source venv/bin/activate
+
+# Установить зависимости
 pip install -r requirements.txt
 
+# Настроить переменные
 cp .env.example .env
 nano .env  # заполни ключи
 ```
@@ -44,39 +50,38 @@ nano .env  # заполни ключи
 ### 4. Запуск
 
 ```bash
+# Активировать окружение (если ещё не активировано)
+source venv/bin/activate
+
 python3 main.py
 ```
 
 ### 5. Systemd (автозапуск)
 
 ```bash
-sudo nano /etc/systemd/system/twitter-monitor.service
-```
-
-```ini
+sudo tee /etc/systemd/system/twitter-monitor.service > /dev/null << 'EOF'
 [Unit]
 Description=Twitter Monitor Bot
 After=network.target
 
 [Service]
 Type=simple
-User=root
 WorkingDirectory=/root/ActivityX
-ExecStart=/usr/bin/python3 /root/ActivityX/main.py
+ExecStart=/root/ActivityX/venv/bin/python main.py
 Restart=always
-RestartSec=15
+RestartSec=10
 Environment=PYTHONUNBUFFERED=1
 
 [Install]
 WantedBy=multi-user.target
-```
+EOF
 
-```bash
-# Активировать и запустить
 sudo systemctl daemon-reload
 sudo systemctl enable twitter-monitor
 sudo systemctl start twitter-monitor
+```
 
+```bash
 # Проверить статус
 sudo systemctl status twitter-monitor
 
