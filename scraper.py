@@ -204,18 +204,19 @@ def matches_keywords(tweet: Tweet, keywords: list[str], exclusions: list[str] | 
 
     if exclusions:
         for ex in exclusions:
-            if ex in text_lower:
+            if ex.lower() in text_lower:
                 return False
 
     if not keywords:
         return True
 
     for kw in keywords:
-        if "+" in kw:
-            parts = [p.strip() for p in kw.split("+") if p.strip()]
+        kw_lower = kw.lower()
+        if "+" in kw_lower:
+            parts = [p.strip() for p in kw_lower.split("+") if p.strip()]
             if parts and all(part in text_lower for part in parts):
                 return True
         else:
-            if kw in text_lower:
+            if kw_lower in text_lower:
                 return True
     return False

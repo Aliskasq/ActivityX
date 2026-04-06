@@ -107,8 +107,28 @@ async def monitor_loop(app: Application):
                 continue
 
             await _clear_error()
-            logger.info(f"Processing {len(tweets)} tweets...")
+
+            # Auto-detect new users from Twitter list
             monitored = set(db.list_accounts())
+            list_users = set(t.username for t in tweets)
+            new_users = list_users - monitored
+            for new_user in sorted(new_users):
+                db.add_account(new_user)
+                db.add_account_keyword(new_user, "winners")
+                logger.info(f"Auto-added @{new_user} with default tag 'winners'")
+                if TG_CHAT_ID:
+                    try:
+                        await app.bot.send_message(
+                            chat_id=TG_CHAT_ID,
+                            text=f"🆕 Новый аккаунт из списка: **@{new_user}**\nТег по умолчанию: `winners`\nНастроить: /pages",
+                            parse_mode="Markdown",
+                        )
+                    except Exception:
+                        pass
+            if new_users:
+                monitored = set(db.list_accounts())
+
+            logger.info(f"Processing {len(tweets)} tweets...")
             matched = []
 
             for tweet in tweets:
