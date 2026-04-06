@@ -1,7 +1,8 @@
 """Entry point — runs Telegram bot + monitor loop together."""
 import asyncio
 import logging
-from telegram.ext import Application
+from telegram import Update
+from telegram.ext import Application, ContextTypes
 
 from config import TG_BOT_TOKEN
 import database as db
@@ -14,6 +15,15 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    """Suppress startup Conflict errors, log everything else."""
+    import telegram
+    if isinstance(context.error, telegram.error.Conflict):
+        logger.debug("Conflict (normal at startup), ignoring")
+        return
+    logger.error(f"Unhandled error: {context.error}", exc_info=context.error)
 
 
 async def post_init(app: Application):
@@ -31,6 +41,7 @@ def main():
 
     app = Application.builder().token(TG_BOT_TOKEN).post_init(post_init).build()
     setup_handlers(app)
+    app.add_error_handler(error_handler)
 
     logger.info("Starting bot...")
     app.run_polling(drop_pending_updates=True)
