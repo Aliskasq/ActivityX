@@ -35,8 +35,11 @@
 git clone https://github.com/Aliskasq/ActivityX.git
 cd ActivityX
 
+# Установить зависимости для venv (если нет)
+apt install -y python3-venv python3-pip
+
 # Создать виртуальное окружение
-python -m venv venv
+python3 -m venv venv
 source venv/bin/activate
 
 # Установить зависимости
@@ -53,7 +56,7 @@ nano .env  # заполни ключи
 # Активировать окружение (если ещё не активировано)
 source venv/bin/activate
 
-python main.py
+python3 main.py
 ```
 
 ### 5. Systemd (автозапуск)
@@ -67,7 +70,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=/root/ActivityX
-ExecStart=/root/ActivityX/venv/bin/python main.py
+ExecStart=/root/ActivityX/venv/bin/python3 main.py
 Restart=always
 RestartSec=10
 Environment=PYTHONUNBUFFERED=1
