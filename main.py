@@ -29,6 +29,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 async def post_init(app: Application):
     """Start monitor loop after bot is initialized."""
     db.init_db()
+    db.deduplicate_accounts()
     db.cleanup_old(days=7)
     asyncio.create_task(monitor_loop(app))
     logger.info("Bot started, monitor loop launched")

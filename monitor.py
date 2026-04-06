@@ -108,9 +108,11 @@ async def monitor_loop(app: Application):
 
             await _clear_error()
 
-            # Auto-detect new users from Twitter list
+            # Sync accounts with Twitter list
             monitored = set(db.list_accounts())
             list_users = set(t.username for t in tweets)
+
+            # Add new users from list
             new_users = list_users - monitored
             for new_user in sorted(new_users):
                 db.add_account(new_user)
@@ -125,7 +127,22 @@ async def monitor_loop(app: Application):
                         )
                     except Exception:
                         pass
-            if new_users:
+
+            # Remove users no longer in list
+            removed_users = monitored - list_users
+            for old_user in sorted(removed_users):
+                db.remove_account(old_user)
+                logger.info(f"Auto-removed @{old_user} (not in Twitter list)")
+                if TG_CHAT_ID:
+                    try:
+                        await app.bot.send_message(
+                            chat_id=TG_CHAT_ID,
+                            text=f"🗑 @{old_user} удалён (нет в Twitter-списке)",
+                        )
+                    except Exception:
+                        pass
+
+            if new_users or removed_users:
                 monitored = set(db.list_accounts())
 
             logger.info(f"Processing {len(tweets)} tweets...")

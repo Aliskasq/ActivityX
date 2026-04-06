@@ -319,16 +319,13 @@ async def cmd_pages(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 def build_pages_keyboard(accounts: list[str]) -> InlineKeyboardMarkup:
     buttons = []
-    row = []
     for acc in accounts:
         tc = len(db.list_account_keywords(acc))
         ec = len(db.list_account_exclusions(acc))
-        row.append(InlineKeyboardButton(f"@{acc} ({tc}t/{ec}x)", callback_data=f"page:{acc}"))
-        if len(row) == 2:
-            buttons.append(row)
-            row = []
-    if row:
-        buttons.append(row)
+        buttons.append([
+            InlineKeyboardButton(f"@{acc} ({tc}t/{ec}x)", callback_data=f"page:{acc}"),
+            InlineKeyboardButton("🗑", callback_data=f"removeacc:{acc}"),
+        ])
     return InlineKeyboardMarkup(buttons)
 
 
@@ -450,6 +447,22 @@ async def callback_back(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     await query.edit_message_text("📄 **Аккаунты:**", reply_markup=build_pages_keyboard(db.list_accounts()), parse_mode="Markdown")
+
+
+async def callback_removeacc(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    username = query.data.split(":", 1)[1]
+    db.remove_account(username)
+    await query.answer(f"@{username} удалён")
+    accounts = db.list_accounts()
+    if accounts:
+        await query.edit_message_text(
+            "📄 **Аккаунты:**",
+            reply_markup=build_pages_keyboard(accounts),
+            parse_mode="Markdown",
+        )
+    else:
+        await query.edit_message_text("📋 Список пуст. /add @username")
 
 
 async def callback_noop(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -599,6 +612,7 @@ def setup_handlers(app: Application):
     ]:
         app.add_handler(CommandHandler(cmd, fn))
 
+    app.add_handler(CallbackQueryHandler(callback_removeacc, pattern=r"^removeacc:"))
     app.add_handler(CallbackQueryHandler(callback_page, pattern=r"^page:"))
     app.add_handler(CallbackQueryHandler(callback_deltag, pattern=r"^deltag:"))
     app.add_handler(CallbackQueryHandler(callback_delexcl, pattern=r"^delexcl:"))

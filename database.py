@@ -1,7 +1,10 @@
 """SQLite database for accounts, per-account keywords/exclusions, and seen tweets."""
+import logging
 import sqlite3
 import os
 from config import DB_PATH
+
+logger = logging.getLogger(__name__)
 
 
 def get_db() -> sqlite3.Connection:
@@ -243,6 +246,25 @@ def set_setting(key: str, value: str):
         (key, value),
     )
     conn.commit()
+    conn.close()
+
+
+def deduplicate_accounts():
+    """Remove duplicate accounts (case-insensitive)."""
+    conn = get_db()
+    rows = conn.execute("SELECT id, username FROM accounts ORDER BY id").fetchall()
+    seen = {}
+    to_delete = []
+    for r in rows:
+        lower = r["username"].lower()
+        if lower in seen:
+            to_delete.append(r["id"])
+        else:
+            seen[lower] = r["id"]
+    if to_delete:
+        conn.execute(f"DELETE FROM accounts WHERE id IN ({','.join('?' * len(to_delete))})", to_delete)
+        conn.commit()
+        logger.info(f"Deduplicated {len(to_delete)} accounts")
     conn.close()
 
 
