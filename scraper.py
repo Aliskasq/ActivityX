@@ -136,7 +136,9 @@ def _parse_tweets(data: dict) -> list[Tweet]:
                 user_legacy = core.get("legacy", {})
                 username = user_legacy.get("screen_name", "unknown").lower()
                 tweet_id = legacy.get("id_str", "")
-                text = legacy.get("full_text", "")
+                # Prefer note_tweet (full text for long tweets 280+)
+                note = result.get("note_tweet", {}).get("note_tweet_results", {}).get("result", {})
+                text = note.get("text", "") or legacy.get("full_text", "")
                 created_at = legacy.get("created_at", "")
                 if tweet_id:
                     tweets.append(Tweet(
