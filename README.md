@@ -36,7 +36,7 @@ git clone https://github.com/Aliskasq/ActivityX.git
 cd ActivityX
 
 # Создать виртуальное окружение
-python3 -m venv venv
+python -m venv venv
 source venv/bin/activate
 
 # Установить зависимости
@@ -53,7 +53,7 @@ nano .env  # заполни ключи
 # Активировать окружение (если ещё не активировано)
 source venv/bin/activate
 
-python3 main.py
+python main.py
 ```
 
 ### 5. Systemd (автозапуск)
