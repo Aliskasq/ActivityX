@@ -219,15 +219,30 @@ async def cmd_key(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 # --- Models ---
 
-AVAILABLE_MODELS = [
-    "stepfun/step-2-16k",
-    "stepfun/step-1-8k",
-    "google/gemma-2-9b-it:free",
-    "meta-llama/llama-3.1-8b-instruct:free",
-    "qwen/qwen-2-7b-instruct:free",
-    "google/gemini-2.0-flash-exp:free",
-    "mistralai/mistral-7b-instruct:free",
-]
+async def _fetch_free_models() -> list[dict]:
+    """Fetch free models from OpenRouter API."""
+    import httpx
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get("https://openrouter.ai/api/v1/models", timeout=15)
+            r.raise_for_status()
+            data = r.json()
+        models = []
+        for m in data.get("data", []):
+            pricing = m.get("pricing", {})
+            prompt_cost = float(pricing.get("prompt", "1") or "1")
+            completion_cost = float(pricing.get("completion", "1") or "1")
+            if prompt_cost == 0 and completion_cost == 0:
+                models.append({
+                    "id": m["id"],
+                    "name": m.get("name", m["id"]),
+                    "context": m.get("context_length", 0),
+                })
+        models.sort(key=lambda x: x["name"].lower())
+        return models
+    except Exception as e:
+        logger.error(f"Failed to fetch models: {e}")
+        return []
 
 
 async def cmd_models(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -238,13 +253,29 @@ async def cmd_models(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         set_model(model_name)
         return await update.message.reply_text(f"✅ Модель: `{model_name}`", parse_mode="Markdown")
 
+    await update.message.reply_text("⏳ Загружаю список моделей...")
+
+    models = await _fetch_free_models()
+    if not models:
+        return await update.message.reply_text("❌ Не удалось загрузить список моделей")
+
     current = get_model()
-    text = f"🤖 **Модель:** `{current}`\n\n"
-    for i, m in enumerate(AVAILABLE_MODELS, 1):
-        marker = "👉 " if m == current else ""
-        text += f"{i}. {marker}`{m}`\n"
-    text += f"\nСменить: /models `название`"
-    await update.message.reply_text(text, parse_mode="Markdown")
+    header = f"🤖 **Текущая модель:** `{current}`\n\n🆓 **Бесплатные модели ({len(models)}):**\n\n"
+
+    # Split into messages (TG limit ~4096 chars)
+    chunks = [header]
+    for i, m in enumerate(models, 1):
+        marker = "👉 " if m["id"] == current else ""
+        ctx_k = m["context"] // 1000 if m["context"] else "?"
+        line = f"{i}. {marker}`{m['id']}`\n    {m['name']} ({ctx_k}k)\n"
+        if len(chunks[-1]) + len(line) > 3800:
+            chunks.append("")
+        chunks[-1] += line
+
+    chunks[-1] += f"\nСменить: `/models название`"
+
+    for chunk in chunks:
+        await update.message.reply_text(chunk, parse_mode="Markdown")
 
 
 # --- Pages ---
