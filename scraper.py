@@ -182,7 +182,7 @@ async def fetch_list_tweets(list_id: str | None = None) -> list[Tweet]:
         return []
 
     headers = _build_headers(cookies)
-    variables = json.dumps({"listId": lid, "count": 40})
+    variables = json.dumps({"listId": lid, "count": 100})
     features = json.dumps(GQL_FEATURES)
     url = f"https://x.com/i/api/graphql/{LIST_GQL_HASH}/ListLatestTweetsTimeline"
 
