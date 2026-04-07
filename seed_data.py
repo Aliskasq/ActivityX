@@ -34,7 +34,7 @@ ACCOUNTS = {
         "tags": ["follow+usdt", "create", "quote"],
         "exclusions": [],
     },
-    "bybit_offical": {
+    "bybit_official": {
         "tags": ["winners+usdt"],
         "exclusions": ["trade"],
     },
