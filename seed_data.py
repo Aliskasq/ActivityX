@@ -38,6 +38,34 @@ ACCOUNTS = {
         "tags": ["winners+usdt"],
         "exclusions": ["trade"],
     },
+    "aeon_community": {
+        "tags": ["winners", "follow+rt"],
+        "exclusions": [],
+    },
+    "kucoincom": {
+        "tags": ["follow+rt", "follow+quote"],
+        "exclusions": ["order", "trade"],
+    },
+    "bingxofficial": {
+        "tags": ["winners", "follow+rt"],
+        "exclusions": [],
+    },
+    "gate": {
+        "tags": ["winners", "follow+like", "follow+rt"],
+        "exclusions": [],
+    },
+    "coinlocallyclyc": {
+        "tags": ["winners", "follow+like", "follow+repost", "follow+rt"],
+        "exclusions": [],
+    },
+    "bitunixofficial": {
+        "tags": ["winners", "follow+rt"],
+        "exclusions": ["trend"],
+    },
+    "ellipal": {
+        "tags": ["giveaway", "follow+rt", "follow+like", "winners"],
+        "exclusions": [],
+    },
 }
 
 

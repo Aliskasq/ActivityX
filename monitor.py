@@ -16,6 +16,8 @@ MSK = timezone(timedelta(hours=3))
 
 # Track error state to avoid spamming
 _last_error_notified: str | None = None
+# Track manual-not-in-list notifications (only send once per user)
+_notified_manual_missing: set[str] = set()
 
 
 def _seconds_until_next_run() -> float:
@@ -115,7 +117,7 @@ async def monitor_loop(app: Application):
             # Add new users from list
             new_users = list_users - monitored
             for new_user in sorted(new_users):
-                db.add_account(new_user)
+                db.add_account(new_user, source="list")
                 db.add_account_keyword(new_user, "winners")
                 logger.info(f"Auto-added @{new_user} with default tag 'winners'")
                 if TG_CHAT_ID:
@@ -128,19 +130,37 @@ async def monitor_loop(app: Application):
                     except Exception:
                         pass
 
-            # Remove users no longer in list
+            # Handle users no longer in list
             removed_users = monitored - list_users
             for old_user in sorted(removed_users):
-                db.remove_account(old_user)
-                logger.info(f"Auto-removed @{old_user} (not in Twitter list)")
-                if TG_CHAT_ID:
-                    try:
-                        await app.bot.send_message(
-                            chat_id=TG_CHAT_ID,
-                            text=f"🗑 @{old_user} удалён (нет в Twitter-списке)",
-                        )
-                    except Exception:
-                        pass
+                source = db.get_account_source(old_user)
+                if source == "manual":
+                    # Don't auto-remove manual accounts — notify once
+                    if old_user not in _notified_manual_missing:
+                        _notified_manual_missing.add(old_user)
+                        logger.info(f"@{old_user} (manual) not in Twitter list — notifying")
+                        if TG_CHAT_ID:
+                            try:
+                                await app.bot.send_message(
+                                    chat_id=TG_CHAT_ID,
+                                    text=f"⚠️ @{old_user} добавлен вручную, но его нет в Twitter-списке!\nДобавь в список или удали: /remove @{old_user}",
+                                )
+                            except Exception:
+                                pass
+                else:
+                    db.remove_account(old_user)
+                    logger.info(f"Auto-removed @{old_user} (not in Twitter list)")
+                    if TG_CHAT_ID:
+                        try:
+                            await app.bot.send_message(
+                                chat_id=TG_CHAT_ID,
+                                text=f"🗑 @{old_user} удалён (нет в Twitter-списке)",
+                            )
+                        except Exception:
+                            pass
+
+            # Clear manual-missing notifications for users now in list
+            _notified_manual_missing -= list_users
 
             if new_users or removed_users:
                 monitored = set(db.list_accounts())

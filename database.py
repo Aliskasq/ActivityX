@@ -21,6 +21,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS accounts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
+            source TEXT DEFAULT 'manual',
             added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS keywords (
@@ -54,22 +55,38 @@ def init_db():
         );
     """)
     conn.commit()
+
+    # Migration: add source column if missing
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(accounts)").fetchall()]
+    if "source" not in cols:
+        conn.execute("ALTER TABLE accounts ADD COLUMN source TEXT DEFAULT 'manual'")
+        conn.commit()
+        logger.info("Migrated accounts table: added 'source' column")
+
     conn.close()
 
 
 # --- Accounts ---
 
-def add_account(username: str) -> bool:
+def add_account(username: str, source: str = "manual") -> bool:
     username = username.strip().lstrip("@").lower()
     conn = get_db()
     try:
-        conn.execute("INSERT INTO accounts (username) VALUES (?)", (username,))
+        conn.execute("INSERT INTO accounts (username, source) VALUES (?, ?)", (username, source))
         conn.commit()
         return True
     except sqlite3.IntegrityError:
         return False
     finally:
         conn.close()
+
+
+def get_account_source(username: str) -> str | None:
+    username = username.strip().lstrip("@").lower()
+    conn = get_db()
+    row = conn.execute("SELECT source FROM accounts WHERE username = ?", (username,)).fetchone()
+    conn.close()
+    return row["source"] if row else None
 
 
 def remove_account(username: str) -> bool:
