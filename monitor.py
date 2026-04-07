@@ -8,7 +8,7 @@ import database as db
 from scraper import fetch_list_tweets, matches_keywords
 from ai_processor import process_tweet
 from bot import send_tweet_to_chat
-from config import TG_CHAT_ID, TWITTER_LIST_ID, get_schedule_mode, get_schedule_times, get_interval_min
+from config import TG_CHAT_ID, TWITTER_LIST_ID, get_schedule_mode, get_schedule_times, get_interval_min, get_sleep_window
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +18,40 @@ MSK = timezone(timedelta(hours=3))
 _last_error_notified: str | None = None
 # Track manual-not-in-list notifications (only send once per user)
 _notified_manual_missing: set[str] = set()
+
+
+def _is_sleeping() -> bool:
+    """Check if current MSK time is within sleep window."""
+    window = get_sleep_window()
+    if not window:
+        return False
+    now_msk = datetime.now(MSK)
+    current = now_msk.hour * 60 + now_msk.minute  # minutes since midnight
+
+    start_h, start_m = map(int, window[0].split(":"))
+    end_h, end_m = map(int, window[1].split(":"))
+    start = start_h * 60 + start_m
+    end = end_h * 60 + end_m
+
+    if start <= end:
+        # Same day: e.g. 02:00-05:00
+        return start <= current < end
+    else:
+        # Overnight: e.g. 23:00-05:00
+        return current >= start or current < end
+
+
+def _seconds_until_wake() -> float:
+    """Seconds until sleep window ends (MSK)."""
+    window = get_sleep_window()
+    if not window:
+        return 0
+    now_msk = datetime.now(MSK)
+    end_h, end_m = map(int, window[1].split(":"))
+    wake = now_msk.replace(hour=end_h, minute=end_m, second=0, microsecond=0)
+    if wake <= now_msk:
+        wake += timedelta(days=1)
+    return (wake - now_msk).total_seconds()
 
 
 def _seconds_until_next_run() -> float:
@@ -85,6 +119,13 @@ async def monitor_loop(app: Application):
         try:
             if not TWITTER_LIST_ID:
                 await asyncio.sleep(60)
+                continue
+
+            # Sleep mode check
+            if _is_sleeping():
+                wake_in = _seconds_until_wake()
+                logger.info(f"💤 Sleep mode — wake in {wake_in/60:.0f} min")
+                await asyncio.sleep(min(wake_in, 300))  # recheck every 5 min max
                 continue
 
             logger.info("Fetching Twitter list...")

@@ -16,6 +16,7 @@ from config import (
     ADMIN_IDS, COOKIES_PATH, get_api_key, set_api_key, get_model, set_model,
     get_schedule_mode, get_schedule_times, get_interval_min,
     set_schedule_times, set_interval_mode,
+    get_sleep_window, set_sleep_window, clear_sleep_window,
 )
 from scraper import _normalize_cookies
 import database as db
@@ -52,6 +53,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/models — список моделей / сменить\n"
         "/time `18:05 20:49` — расписание скана (МСК)\n"
         "/time `20` — интервал каждые N мин\n"
+        "/sleep `02:00-05:00` — время сна (МСК)\n"
         "/status — статус",
         parse_mode="Markdown",
     )
@@ -559,6 +561,51 @@ async def cmd_time(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
 
 
+# --- Sleep ---
+
+async def cmd_sleep(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        return
+    import re
+
+    if not ctx.args:
+        window = get_sleep_window()
+        if window:
+            return await update.message.reply_text(
+                f"💤 **Сон:** `{window[0]}` — `{window[1]}` (МСК)\n\n"
+                f"Изменить: `/sleep 02:00-05:00`\n"
+                f"Отключить: `/sleep 0`",
+                parse_mode="Markdown",
+            )
+        return await update.message.reply_text(
+            "💤 **Сон:** выключен\n\n"
+            "Включить: `/sleep 02:00-05:00`\n"
+            "Формат: `/sleep ЧЧ:ММ-ЧЧ:ММ` (МСК)",
+            parse_mode="Markdown",
+        )
+
+    arg = " ".join(ctx.args).strip()
+
+    if arg == "0":
+        clear_sleep_window()
+        return await update.message.reply_text("✅ Сон отключён — бот работает 24/7")
+
+    match = re.match(r"^(\d{1,2}:\d{2})\s*[-–]\s*(\d{1,2}:\d{2})$", arg)
+    if not match:
+        return await update.message.reply_text(
+            "❌ Формат: `/sleep 02:00-05:00` или `/sleep 0`",
+            parse_mode="Markdown",
+        )
+
+    start, end = match.group(1), match.group(2)
+    set_sleep_window(start, end)
+    await update.message.reply_text(
+        f"✅ Сон: `{start}` — `{end}` (МСК)\n"
+        f"Бот не парсит в это время.",
+        parse_mode="Markdown",
+    )
+
+
 # --- Status ---
 
 async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -573,13 +620,16 @@ async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     else:
         times = get_schedule_times()
         schedule_str = f"МСК: {', '.join(times)}" if times else "не задано"
+    window = get_sleep_window()
+    sleep_str = f"{window[0]}—{window[1]} МСК" if window else "выключен"
     await update.message.reply_text(
         f"📊 **Статус**\n\n"
         f"Аккаунтов: {len(accounts)}\n"
         f"Куки: {'✅' if has_cookies else '❌'}\n"
         f"List ID: `{TWITTER_LIST_ID or 'не установлен'}`\n"
         f"Модель: `{get_model()}`\n"
-        f"Расписание: {schedule_str}",
+        f"Расписание: {schedule_str}\n"
+        f"Сон: {sleep_str}",
         parse_mode="Markdown",
     )
 
@@ -635,7 +685,7 @@ def setup_handlers(app: Application):
         ("start", cmd_start), ("help", cmd_start), ("add", cmd_add),
         ("remove", cmd_remove), ("list", cmd_list), ("pages", cmd_pages),
         ("key", cmd_key), ("models", cmd_models), ("listid", cmd_listid),
-        ("status", cmd_status), ("time", cmd_time),
+        ("status", cmd_status), ("time", cmd_time), ("sleep", cmd_sleep),
     ]:
         app.add_handler(CommandHandler(cmd, fn))
 

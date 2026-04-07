@@ -70,6 +70,28 @@ def set_interval_mode(minutes: int = 20):
     set_setting("interval_min", str(minutes))
 
 
+def get_sleep_window() -> tuple[str, str] | None:
+    """Return (start, end) sleep times in HH:MM MSK, or None if not set."""
+    from database import get_setting
+    raw = get_setting("sleep_window", "")
+    if not raw or raw == "0":
+        return None
+    parts = raw.split("-")
+    if len(parts) != 2:
+        return None
+    return parts[0].strip(), parts[1].strip()
+
+
+def set_sleep_window(start: str, end: str):
+    from database import set_setting
+    set_setting("sleep_window", f"{start}-{end}")
+
+
+def clear_sleep_window():
+    from database import set_setting
+    set_setting("sleep_window", "0")
+
+
 def _save_env(key: str, value: str):
     env_path = os.path.join(os.path.dirname(__file__), ".env")
     lines = []
