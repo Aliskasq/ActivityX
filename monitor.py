@@ -75,6 +75,7 @@ async def _clear_error():
 
 async def monitor_loop(app: Application):
     """Main loop: fetch list tweets on schedule, filter by per-account tags."""
+    global _notified_manual_missing
     logger.info("Monitor loop started")
 
     if not TWITTER_LIST_ID:
