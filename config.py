@@ -55,7 +55,8 @@ def get_schedule_times() -> list[str]:
 
 
 def get_interval_min() -> int:
-    return 30
+    from database import get_setting
+    return int(get_setting("interval_min", "20"))
 
 
 def set_schedule_times(times: list[str]):
@@ -63,9 +64,10 @@ def set_schedule_times(times: list[str]):
     set_setting("schedule_times", ",".join(times))
 
 
-def set_interval_mode():
+def set_interval_mode(minutes: int = 20):
     from database import set_setting
     set_setting("schedule_times", "")
+    set_setting("interval_min", str(minutes))
 
 
 def _save_env(key: str, value: str):

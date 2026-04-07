@@ -51,7 +51,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/key `ключ` — сменить OpenRouter API ключ\n"
         "/models — список моделей / сменить\n"
         "/time `18:05 20:49` — расписание скана (МСК)\n"
-        "/time30 — сканить каждые 30 мин\n"
+        "/time `20` — интервал каждые N мин\n"
         "/status — статус",
         parse_mode="Markdown",
     )
@@ -507,8 +507,9 @@ async def cmd_time(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 f"⏰ **Режим:** каждые {get_interval_min()} мин\n\n"
                 f"**Задать расписание (МСК):**\n"
                 f"`/time 18:05 18:38 20:49 03:00`\n\n"
-                f"**Вернуть интервал:**\n"
-                f"`/time30` — каждые 30 мин",
+                f"**Задать интервал:**\n"
+                f"`/time 20` — каждые 20 мин\n"
+                f"`/time 45` — каждые 45 мин",
                 parse_mode="Markdown",
             )
         else:
@@ -519,13 +520,22 @@ async def cmd_time(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 f"**Время:** `{times_str}`\n\n"
                 f"**Изменить:**\n"
                 f"`/time 18:05 20:00 03:00`\n\n"
-                f"**Вернуть интервал:**\n"
-                f"`/time30` — каждые 30 мин",
+                f"**Задать интервал:**\n"
+                f"`/time 20` — каждые 20 мин",
                 parse_mode="Markdown",
             )
 
-    # Parse times
     import re
+
+    # Single number = interval mode
+    if len(ctx.args) == 1 and re.match(r"^\d+$", ctx.args[0].strip()):
+        minutes = int(ctx.args[0].strip())
+        if minutes < 1 or minutes > 1440:
+            return await update.message.reply_text("❌ Интервал: от 1 до 1440 минут")
+        set_interval_mode(minutes)
+        return await update.message.reply_text(f"✅ Режим: каждые {minutes} мин")
+
+    # Parse times
     times = []
     for arg in ctx.args:
         arg = arg.strip()
@@ -533,7 +543,7 @@ async def cmd_time(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             times.append(arg)
         else:
             return await update.message.reply_text(
-                f"❌ Неверный формат: `{arg}`\nИспользуй: `/time 18:05 20:49 03:00`",
+                f"❌ Неверный формат: `{arg}`\nИспользуй: `/time 18:05 20:49 03:00` или `/time 20`",
                 parse_mode="Markdown",
             )
 
@@ -547,13 +557,6 @@ async def cmd_time(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"Скан будет в указанное время.",
         parse_mode="Markdown",
     )
-
-
-async def cmd_time30(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
-        return
-    set_interval_mode()
-    await update.message.reply_text("✅ Режим: каждые 30 мин")
 
 
 # --- Status ---
@@ -632,7 +635,7 @@ def setup_handlers(app: Application):
         ("start", cmd_start), ("help", cmd_start), ("add", cmd_add),
         ("remove", cmd_remove), ("list", cmd_list), ("pages", cmd_pages),
         ("key", cmd_key), ("models", cmd_models), ("listid", cmd_listid),
-        ("status", cmd_status), ("time", cmd_time), ("time30", cmd_time30),
+        ("status", cmd_status), ("time", cmd_time),
     ]:
         app.add_handler(CommandHandler(cmd, fn))
 
