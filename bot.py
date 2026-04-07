@@ -42,7 +42,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "🐦 **Twitter Monitor Bot**\n\n"
         "**Аккаунты:**\n"
         "/add `@username` — добавить\n"
-        "/remove `@username` — удалить\n"
+        "/remove — удалить (кнопки)\n"
         "/list — список с тегами\n"
         "/pages — управление тегами (кнопки)\n\n"
         "**Настройки:**\n"
@@ -72,13 +72,20 @@ async def cmd_add(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def cmd_remove(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return
-    if not ctx.args:
-        return await update.message.reply_text("Использование: /remove @username")
-    username = ctx.args[0].lstrip("@").lower()
-    if db.remove_account(username):
-        await update.message.reply_text(f"🗑 @{username} удалён")
-    else:
-        await update.message.reply_text(f"⚠️ @{username} не найден")
+    if ctx.args:
+        username = ctx.args[0].lstrip("@").lower()
+        if db.remove_account(username):
+            return await update.message.reply_text(f"🗑 @{username} удалён")
+        else:
+            return await update.message.reply_text(f"⚠️ @{username} не найден")
+    accounts = db.list_accounts()
+    if not accounts:
+        return await update.message.reply_text("📋 Список пуст.")
+    await update.message.reply_text(
+        "🗑 **Выбери аккаунт для удаления:**",
+        reply_markup=build_remove_keyboard(accounts),
+        parse_mode="Markdown",
+    )
 
 
 async def cmd_list(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -319,13 +326,26 @@ async def cmd_pages(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 def build_pages_keyboard(accounts: list[str]) -> InlineKeyboardMarkup:
     buttons = []
+    row = []
     for acc in accounts:
         tc = len(db.list_account_keywords(acc))
         ec = len(db.list_account_exclusions(acc))
+        row.append(InlineKeyboardButton(f"@{acc} ({tc}t/{ec}x)", callback_data=f"page:{acc}"))
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    return InlineKeyboardMarkup(buttons)
+
+
+def build_remove_keyboard(accounts: list[str]) -> InlineKeyboardMarkup:
+    buttons = []
+    for acc in accounts:
         buttons.append([
-            InlineKeyboardButton(f"@{acc} ({tc}t/{ec}x)", callback_data=f"page:{acc}"),
-            InlineKeyboardButton("🗑", callback_data=f"removeacc:{acc}"),
+            InlineKeyboardButton(f"🗑 @{acc}", callback_data=f"removeacc:{acc}"),
         ])
+    buttons.append([InlineKeyboardButton("⬅️ Отмена", callback_data="back:cancel")])
     return InlineKeyboardMarkup(buttons)
 
 
@@ -446,7 +466,11 @@ async def cancel_input(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def callback_back(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("📄 **Аккаунты:**", reply_markup=build_pages_keyboard(db.list_accounts()), parse_mode="Markdown")
+    target = query.data.split(":", 1)[1] if ":" in query.data else "pages"
+    if target == "cancel":
+        await query.edit_message_text("Отменено.")
+    else:
+        await query.edit_message_text("📄 **Аккаунты:**", reply_markup=build_pages_keyboard(db.list_accounts()), parse_mode="Markdown")
 
 
 async def callback_removeacc(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -457,12 +481,12 @@ async def callback_removeacc(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     accounts = db.list_accounts()
     if accounts:
         await query.edit_message_text(
-            "📄 **Аккаунты:**",
-            reply_markup=build_pages_keyboard(accounts),
+            "🗑 **Удалён @" + username + "**\n\nУдалить ещё:",
+            reply_markup=build_remove_keyboard(accounts),
             parse_mode="Markdown",
         )
     else:
-        await query.edit_message_text("📋 Список пуст. /add @username")
+        await query.edit_message_text("📋 Все аккаунты удалены.")
 
 
 async def callback_noop(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
