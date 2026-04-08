@@ -1,7 +1,9 @@
 """Telegram bot with commands for managing Twitter monitor."""
+import asyncio
 import json
 import logging
 import os
+import subprocess
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -45,7 +47,9 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/add `@username` — добавить\n"
         "/remove — удалить (кнопки)\n"
         "/list — список с тегами\n"
-        "/pages — управление тегами (кнопки)\n\n"
+        "/pages — управление тегами (кнопки)\n"
+        "/sync — сравнить бот с Twitter-списком\n"
+        "/git — запушить аккаунты/теги на GitHub\n\n"
         "**Настройки:**\n"
         "/cookies — загрузить куки Twitter\n"
         "/listid `ID` — установить ID списка Twitter\n"
@@ -634,6 +638,119 @@ async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
 
 
+# --- Sync ---
+
+async def cmd_sync(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Manual sync: compare bot accounts with actual Twitter list members."""
+    if not is_admin(update.effective_user.id):
+        return
+    await update.message.reply_text("🔄 Загружаю участников списка...")
+
+    from scraper import fetch_list_members
+    list_members = await fetch_list_members()
+
+    if not list_members:
+        return await update.message.reply_text(
+            "❌ Не удалось загрузить участников списка.\n"
+            "Проверь куки (/cookies) и List ID (/listid)"
+        )
+
+    monitored = set(db.list_accounts())
+
+    only_in_list = sorted(list_members - monitored)
+    only_in_bot = sorted(monitored - list_members)
+    in_both = sorted(list_members & monitored)
+
+    text = f"📊 **Синхронизация**\n\n"
+    text += f"✅ В списке и в боте: **{len(in_both)}**\n"
+
+    if only_in_list:
+        text += f"\n🆕 **В списке, но НЕ в боте ({len(only_in_list)}):**\n"
+        for u in only_in_list:
+            text += f"  • @{u}\n"
+
+    if only_in_bot:
+        text += f"\n⚠️ **В боте, но НЕ в списке ({len(only_in_bot)}):**\n"
+        for u in only_in_bot:
+            source = db.get_account_source(u)
+            tag = " (manual)" if source == "manual" else ""
+            text += f"  • @{u}{tag}\n"
+
+    if not only_in_list and not only_in_bot:
+        text += "\n🎉 Всё синхронизировано!"
+
+    if len(text) > 4000:
+        text = text[:3950] + "\n\n... (обрезано)"
+
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+
+# --- Git push ---
+
+async def cmd_git(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Export accounts/tags/exclusions to JSON and push to GitHub."""
+    if not is_admin(update.effective_user.id):
+        return
+    await update.message.reply_text("📦 Экспортирую аккаунты и пушу на GitHub...")
+
+    try:
+        # Export accounts with tags and exclusions
+        accounts = db.list_accounts()
+        export = []
+        for acc in accounts:
+            source = db.get_account_source(acc)
+            tags = db.list_account_keywords(acc)
+            exclusions = db.list_account_exclusions(acc)
+            export.append({
+                "username": acc,
+                "source": source or "manual",
+                "tags": tags,
+                "exclusions": exclusions,
+            })
+
+        # Write export file
+        bot_dir = os.path.dirname(os.path.abspath(__file__))
+        export_path = os.path.join(bot_dir, "accounts_export.json")
+        with open(export_path, "w", encoding="utf-8") as f:
+            json.dump(export, f, ensure_ascii=False, indent=2)
+
+        # Git add, commit, push
+        def _git_push():
+            cwd = bot_dir
+            subprocess.run(["git", "add", "-A"], cwd=cwd, check=True, capture_output=True)
+            # Check if there are changes to commit
+            result = subprocess.run(
+                ["git", "status", "--porcelain"], cwd=cwd, capture_output=True, text=True
+            )
+            if not result.stdout.strip():
+                return "nothing"
+            subprocess.run(
+                ["git", "commit", "-m", f"bot: update accounts ({len(export)} users)"],
+                cwd=cwd, check=True, capture_output=True,
+            )
+            subprocess.run(
+                ["git", "push"], cwd=cwd, check=True, capture_output=True, timeout=30,
+            )
+            return "ok"
+
+        loop = asyncio.get_event_loop()
+        status = await loop.run_in_executor(None, _git_push)
+
+        if status == "nothing":
+            await update.message.reply_text("✅ Нет изменений — GitHub уже актуален")
+        else:
+            await update.message.reply_text(
+                f"✅ Запушено на GitHub!\n"
+                f"📋 Аккаунтов: **{len(export)}**",
+                parse_mode="Markdown",
+            )
+    except subprocess.CalledProcessError as e:
+        stderr = e.stderr.decode() if e.stderr else str(e)
+        await update.message.reply_text(f"❌ Git ошибка:\n`{stderr[:500]}`", parse_mode="Markdown")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка: {e}")
+
+
 async def send_tweet_to_chat(app: Application, chat_id: str | int, username: str,
                               tweet_url: str, ai_text: str):
     keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Открыть в X", url=tweet_url)]])
@@ -686,6 +803,7 @@ def setup_handlers(app: Application):
         ("remove", cmd_remove), ("list", cmd_list), ("pages", cmd_pages),
         ("key", cmd_key), ("models", cmd_models), ("listid", cmd_listid),
         ("status", cmd_status), ("time", cmd_time), ("sleep", cmd_sleep),
+        ("sync", cmd_sync), ("git", cmd_git),
     ]:
         app.add_handler(CommandHandler(cmd, fn))
 

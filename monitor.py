@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from telegram.ext import Application
 
 import database as db
-from scraper import fetch_list_tweets, matches_keywords
+from scraper import fetch_list_tweets, fetch_list_members, matches_keywords
 from ai_processor import process_tweet
 from bot import send_tweet_to_chat
 from config import TG_CHAT_ID, TWITTER_LIST_ID, get_schedule_mode, get_schedule_times, get_interval_min, get_sleep_window
@@ -26,7 +26,7 @@ def _is_sleeping() -> bool:
     if not window:
         return False
     now_msk = datetime.now(MSK)
-    current = now_msk.hour * 60 + now_msk.minute  # minutes since midnight
+    current = now_msk.hour * 60 + now_msk.minute
 
     start_h, start_m = map(int, window[0].split(":"))
     end_h, end_m = map(int, window[1].split(":"))
@@ -34,10 +34,8 @@ def _is_sleeping() -> bool:
     end = end_h * 60 + end_m
 
     if start <= end:
-        # Same day: e.g. 02:00-05:00
         return start <= current < end
     else:
-        # Overnight: e.g. 23:00-05:00
         return current >= start or current < end
 
 
@@ -61,10 +59,9 @@ def _seconds_until_next_run() -> float:
     if mode == "interval":
         return get_interval_min() * 60
 
-    # Schedule mode — find next MSK time
     times = get_schedule_times()
     if not times:
-        return 1800  # fallback 30 min
+        return 1800
 
     now_msk = datetime.now(MSK)
     upcoming = []
@@ -85,14 +82,14 @@ def _seconds_until_next_run() -> float:
 
     nearest = min(upcoming)
     delta = (nearest - now_msk).total_seconds()
-    return max(delta, 10)  # minimum 10 sec safety
+    return max(delta, 10)
 
 
 async def _notify_error(app: Application, error_key: str, message: str):
     """Send error notification to TG (once per error type, no spam)."""
     global _last_error_notified
     if _last_error_notified == error_key:
-        return  # already notified about this
+        return
     _last_error_notified = error_key
     if TG_CHAT_ID:
         try:
@@ -107,9 +104,73 @@ async def _clear_error():
     _last_error_notified = None
 
 
+async def sync_members(app: Application) -> set[str] | None:
+    """Sync bot accounts with actual Twitter list members.
+
+    Returns set of list members if successful, None on error.
+    """
+    global _notified_manual_missing
+
+    logger.info("Fetching list members...")
+    list_members = await fetch_list_members()
+    if not list_members:
+        logger.warning("Could not fetch list members (empty or error) — skipping sync")
+        return None
+
+    monitored = set(db.list_accounts())
+
+    # Add new users from list
+    new_users = list_members - monitored
+    for new_user in sorted(new_users):
+        db.add_account(new_user, source="list")
+        db.add_account_keyword(new_user, "winners")
+        logger.info(f"Auto-added @{new_user} with default tag 'winners'")
+        if TG_CHAT_ID:
+            try:
+                await app.bot.send_message(
+                    chat_id=TG_CHAT_ID,
+                    text=f"🆕 Новый аккаунт из списка: **@{new_user}**\nТег по умолчанию: `winners`\nНастроить: /pages",
+                    parse_mode="Markdown",
+                )
+            except Exception:
+                pass
+
+    # Handle users no longer in list
+    removed_users = monitored - list_members
+    for old_user in sorted(removed_users):
+        source = db.get_account_source(old_user)
+        if source == "manual":
+            if old_user not in _notified_manual_missing:
+                _notified_manual_missing.add(old_user)
+                logger.info(f"@{old_user} (manual) not in Twitter list — notifying")
+                if TG_CHAT_ID:
+                    try:
+                        await app.bot.send_message(
+                            chat_id=TG_CHAT_ID,
+                            text=f"⚠️ @{old_user} добавлен вручную, но его нет в Twitter-списке!\nДобавь в список или удали: /remove @{old_user}",
+                        )
+                    except Exception:
+                        pass
+        else:
+            db.remove_account(old_user)
+            logger.info(f"Auto-removed @{old_user} (not in Twitter list)")
+            if TG_CHAT_ID:
+                try:
+                    await app.bot.send_message(
+                        chat_id=TG_CHAT_ID,
+                        text=f"🗑 @{old_user} удалён (нет в Twitter-списке)",
+                    )
+                except Exception:
+                    pass
+
+    # Clear manual-missing notifications for users now back in list
+    _notified_manual_missing -= list_members
+
+    return list_members
+
+
 async def monitor_loop(app: Application):
     """Main loop: fetch list tweets on schedule, filter by per-account tags."""
-    global _notified_manual_missing
     logger.info("Monitor loop started")
 
     if not TWITTER_LIST_ID:
@@ -125,10 +186,13 @@ async def monitor_loop(app: Application):
             if _is_sleeping():
                 wake_in = _seconds_until_wake()
                 logger.info(f"💤 Sleep mode — wake in {wake_in/60:.0f} min")
-                await asyncio.sleep(min(wake_in, 300))  # recheck every 5 min max
+                await asyncio.sleep(min(wake_in, 300))
                 continue
 
-            logger.info("Fetching Twitter list...")
+            # Sync members with actual Twitter list (every scan)
+            await sync_members(app)
+
+            logger.info("Fetching Twitter list tweets...")
             try:
                 tweets = await fetch_list_tweets()
             except Exception as e:
@@ -152,61 +216,7 @@ async def monitor_loop(app: Application):
 
             await _clear_error()
 
-            # Sync accounts with Twitter list
             monitored = set(db.list_accounts())
-            list_users = set(t.username for t in tweets)
-
-            # Add new users from list
-            new_users = list_users - monitored
-            for new_user in sorted(new_users):
-                db.add_account(new_user, source="list")
-                db.add_account_keyword(new_user, "winners")
-                logger.info(f"Auto-added @{new_user} with default tag 'winners'")
-                if TG_CHAT_ID:
-                    try:
-                        await app.bot.send_message(
-                            chat_id=TG_CHAT_ID,
-                            text=f"🆕 Новый аккаунт из списка: **@{new_user}**\nТег по умолчанию: `winners`\nНастроить: /pages",
-                            parse_mode="Markdown",
-                        )
-                    except Exception:
-                        pass
-
-            # Handle users no longer in list
-            removed_users = monitored - list_users
-            for old_user in sorted(removed_users):
-                source = db.get_account_source(old_user)
-                if source == "manual":
-                    # Don't auto-remove manual accounts — notify once
-                    if old_user not in _notified_manual_missing:
-                        _notified_manual_missing.add(old_user)
-                        logger.info(f"@{old_user} (manual) not in Twitter list — notifying")
-                        if TG_CHAT_ID:
-                            try:
-                                await app.bot.send_message(
-                                    chat_id=TG_CHAT_ID,
-                                    text=f"⚠️ @{old_user} добавлен вручную, но его нет в Twitter-списке!\nДобавь в список или удали: /remove @{old_user}",
-                                )
-                            except Exception:
-                                pass
-                else:
-                    db.remove_account(old_user)
-                    logger.info(f"Auto-removed @{old_user} (not in Twitter list)")
-                    if TG_CHAT_ID:
-                        try:
-                            await app.bot.send_message(
-                                chat_id=TG_CHAT_ID,
-                                text=f"🗑 @{old_user} удалён (нет в Twitter-списке)",
-                            )
-                        except Exception:
-                            pass
-
-            # Clear manual-missing notifications for users now in list
-            _notified_manual_missing -= list_users
-
-            if new_users or removed_users:
-                monitored = set(db.list_accounts())
-
             logger.info(f"Processing {len(tweets)} tweets...")
             matched = []
 
@@ -236,7 +246,8 @@ async def monitor_loop(app: Application):
                     ai_result = await process_tweet(tweet.text, tweet.username)
                     if TG_CHAT_ID:
                         await send_tweet_to_chat(app, TG_CHAT_ID, tweet.username, tweet.url, ai_result)
-                    await asyncio.sleep(3)
+                    # 30 sec pause between AI requests to avoid 429 on free models
+                    await asyncio.sleep(30)
                 except Exception as e:
                     logger.error(f"Error processing @{tweet.username}/{tweet.tweet_id}: {e}")
 

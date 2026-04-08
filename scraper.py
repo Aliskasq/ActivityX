@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 
 BEARER = "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
 LIST_GQL_HASH = "HjsWc-nwwHKYwHenbHm-tw"
+MEMBERS_GQL_HASH = "oZLcyjKOfXBf2Jln31YXPw"
+
 GQL_FEATURES = {
     "rweb_tipjar_consumption_enabled": True,
     "responsive_web_graphql_exclude_directive_enabled": True,
@@ -35,6 +37,46 @@ GQL_FEATURES = {
     "rweb_video_timestamps_enabled": True,
     "longform_notetweets_rich_text_read_enabled": True,
     "longform_notetweets_inline_media_enabled": True,
+    "responsive_web_enhance_cards_enabled": False,
+}
+
+MEMBERS_FEATURES = {
+    "rweb_video_screen_enabled": False,
+    "profile_label_improvements_pcf_label_in_post_enabled": True,
+    "responsive_web_profile_redirect_enabled": False,
+    "rweb_tipjar_consumption_enabled": False,
+    "verified_phone_label_enabled": False,
+    "creator_subscriptions_tweet_preview_api_enabled": True,
+    "responsive_web_graphql_timeline_navigation_enabled": True,
+    "responsive_web_graphql_skip_user_profile_image_extensions_enabled": False,
+    "premium_content_api_read_enabled": False,
+    "communities_web_enable_tweet_community_results_fetch": True,
+    "c9s_tweet_anatomy_moderator_badge_enabled": True,
+    "responsive_web_grok_analyze_button_fetch_trends_enabled": False,
+    "responsive_web_grok_analyze_post_followups_enabled": False,
+    "responsive_web_jetfuel_frame": True,
+    "responsive_web_grok_share_attachment_enabled": True,
+    "responsive_web_grok_annotations_enabled": True,
+    "articles_preview_enabled": True,
+    "responsive_web_edit_tweet_api_enabled": True,
+    "graphql_is_translatable_rweb_tweet_is_translatable_enabled": True,
+    "view_counts_everywhere_api_enabled": True,
+    "longform_notetweets_consumption_enabled": True,
+    "responsive_web_twitter_article_tweet_consumption_enabled": True,
+    "tweet_awards_web_tipping_enabled": False,
+    "content_disclosure_indicator_enabled": True,
+    "content_disclosure_ai_generated_indicator_enabled": True,
+    "responsive_web_grok_show_grok_translated_post": False,
+    "responsive_web_grok_analysis_button_from_backend": True,
+    "post_ctas_fetch_enabled": False,
+    "freedom_of_speech_not_reach_fetch_enabled": True,
+    "standardized_nudges_misinfo": True,
+    "tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled": True,
+    "longform_notetweets_rich_text_read_enabled": True,
+    "longform_notetweets_inline_media_enabled": False,
+    "responsive_web_grok_image_annotation_enabled": True,
+    "responsive_web_grok_imagine_annotation_enabled": True,
+    "responsive_web_grok_community_note_auto_translation_is_enabled": False,
     "responsive_web_enhance_cards_enabled": False,
 }
 
@@ -210,6 +252,65 @@ async def fetch_list_tweets(list_id: str | None = None) -> list[Tweet]:
         logger.error(f"Error fetching list tweets: {e}", exc_info=True)
         reset_client()
         return []
+
+
+async def fetch_list_members(list_id: str | None = None) -> set[str]:
+    """Fetch actual members of a Twitter list via GraphQL ListMembers."""
+    cookies = _load_cookies()
+    if not cookies:
+        return set()
+
+    lid = list_id or TWITTER_LIST_ID
+    if not lid:
+        logger.error("TWITTER_LIST_ID not set")
+        return set()
+
+    headers = _build_headers(cookies)
+    variables = json.dumps({"listId": lid, "count": 200})
+    features = json.dumps(MEMBERS_FEATURES)
+    url = f"https://x.com/i/api/graphql/{MEMBERS_GQL_HASH}/ListMembers"
+
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                url,
+                headers=headers,
+                params={"variables": variables, "features": features},
+                timeout=20,
+                follow_redirects=True,
+            )
+        if r.status_code != 200:
+            logger.error(f"ListMembers API error {r.status_code}: {r.text[:200]}")
+            if r.status_code in (401, 403):
+                reset_client()
+            return set()
+
+        data = r.json()
+        members = set()
+        try:
+            instructions = data["data"]["list"]["members_timeline"]["timeline"]["instructions"]
+            for instruction in instructions:
+                entries = instruction.get("entries", [])
+                for entry in entries:
+                    content = entry.get("content", {})
+                    if content.get("__typename") != "TimelineTimelineItem":
+                        continue
+                    result = content.get("itemContent", {}).get("user_results", {}).get("result", {})
+                    if not result:
+                        continue
+                    legacy = result.get("legacy", {})
+                    screen_name = legacy.get("screen_name", "").lower()
+                    if screen_name:
+                        members.add(screen_name)
+        except (KeyError, TypeError) as e:
+            logger.error(f"Error parsing list members: {e}")
+
+        logger.info(f"Got {len(members)} members from list {lid}")
+        return members
+
+    except Exception as e:
+        logger.error(f"Error fetching list members: {e}", exc_info=True)
+        return set()
 
 
 async def fetch_user_tweets(username: str) -> list[Tweet]:
