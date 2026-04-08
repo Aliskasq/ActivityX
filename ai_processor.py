@@ -67,7 +67,7 @@ async def process_tweet(tweet_text: str, username: str) -> str:
                         "max_tokens": 1500,
                         "temperature": 0.3,
                     },
-                    timeout=30,
+                    timeout=240,
                 )
 
                 if resp.status_code == 429:
