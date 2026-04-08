@@ -1,0 +1,165 @@
+[
+  {
+    "username": "binanceafrica",
+    "source": "manual",
+    "tags": [
+      "winners",
+      "create",
+      "share+usdt",
+      "share+usdc",
+      "follow+repost",
+      "follow+retweet",
+      "giveaway",
+      "follow+rt",
+      "like+repost",
+      "like+rt"
+    ],
+    "exclusions": []
+  },
+  {
+    "username": "binance",
+    "source": "manual",
+    "tags": [
+      "win+usdc",
+      "follow+repost",
+      "giveaway",
+      "follow+rt",
+      "like+repost",
+      "like+rt",
+      "win+usdt",
+      "reward+bnb",
+      "reward+usdc"
+    ],
+    "exclusions": []
+  },
+  {
+    "username": "htx_global",
+    "source": "manual",
+    "tags": [
+      "follow+rt",
+      "giveaway"
+    ],
+    "exclusions": []
+  },
+  {
+    "username": "bitmartexchange",
+    "source": "manual",
+    "tags": [
+      "follow+usdt",
+      "create",
+      "quote"
+    ],
+    "exclusions": []
+  },
+  {
+    "username": "mexc",
+    "source": "manual",
+    "tags": [
+      "winners"
+    ],
+    "exclusions": [
+      "trade",
+      "referral"
+    ]
+  },
+  {
+    "username": "usddio",
+    "source": "manual",
+    "tags": [
+      "follow+rt",
+      "giveaway",
+      "create"
+    ],
+    "exclusions": []
+  },
+  {
+    "username": "bybit_official",
+    "source": "manual",
+    "tags": [
+      "winners"
+    ],
+    "exclusions": []
+  },
+  {
+    "username": "aeon_community",
+    "source": "manual",
+    "tags": [
+      "winners",
+      "follow+rt"
+    ],
+    "exclusions": []
+  },
+  {
+    "username": "bingxofficial",
+    "source": "manual",
+    "tags": [
+      "winners",
+      "follow+rt"
+    ],
+    "exclusions": []
+  },
+  {
+    "username": "bitunixofficial",
+    "source": "manual",
+    "tags": [
+      "winners",
+      "follow+rt"
+    ],
+    "exclusions": [
+      "trend"
+    ]
+  },
+  {
+    "username": "coinlocallyclyc",
+    "source": "manual",
+    "tags": [
+      "winners",
+      "follow+like",
+      "follow+repost",
+      "follow+rt"
+    ],
+    "exclusions": []
+  },
+  {
+    "username": "ellipal",
+    "source": "manual",
+    "tags": [
+      "winners",
+      "giveaway",
+      "follow+rt",
+      "follow+like"
+    ],
+    "exclusions": []
+  },
+  {
+    "username": "gate",
+    "source": "manual",
+    "tags": [
+      "winners",
+      "follow+like",
+      "follow+rt"
+    ],
+    "exclusions": []
+  },
+  {
+    "username": "kucoincom",
+    "source": "manual",
+    "tags": [
+      "winners",
+      "follow+rt",
+      "follow+quote"
+    ],
+    "exclusions": [
+      "order",
+      "trade"
+    ]
+  },
+  {
+    "username": "binanceforin",
+    "source": "list",
+    "tags": [
+      "winners"
+    ],
+    "exclusions": []
+  }
+]
