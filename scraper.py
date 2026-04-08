@@ -83,6 +83,37 @@ MEMBERS_FEATURES = {
 _cookies: dict | None = None
 
 
+def _find_key(obj, key: str) -> list:
+    """Recursively find all values for a given key in nested dicts/lists."""
+    results = []
+    if isinstance(obj, dict):
+        if key in obj and obj[key]:
+            results.append(obj[key])
+        for v in obj.values():
+            results.extend(_find_key(v, key))
+    elif isinstance(obj, list):
+        for item in obj:
+            results.extend(_find_key(item, key))
+    return results
+
+
+def _find_screen_name(user_result: dict) -> str | None:
+    """Extract screen_name from a user result object (handles API changes)."""
+    # Try legacy.screen_name first (old format)
+    legacy = user_result.get("legacy", {})
+    if legacy.get("screen_name"):
+        return legacy["screen_name"]
+    # Try core.screen_name
+    core = user_result.get("core", {})
+    if core.get("screen_name"):
+        return core["screen_name"]
+    # Recursive search as fallback
+    found = _find_key(user_result, "screen_name")
+    if found:
+        return found[0]
+    return None
+
+
 @dataclass
 class Tweet:
     tweet_id: str
@@ -298,10 +329,9 @@ async def fetch_list_members(list_id: str | None = None) -> set[str]:
                     result = content.get("itemContent", {}).get("user_results", {}).get("result", {})
                     if not result:
                         continue
-                    legacy = result.get("legacy", {})
-                    screen_name = legacy.get("screen_name", "").lower()
+                    screen_name = _find_screen_name(result)
                     if screen_name:
-                        members.add(screen_name)
+                        members.add(screen_name.lower())
         except (KeyError, TypeError) as e:
             logger.error(f"Error parsing list members: {e}")
 
