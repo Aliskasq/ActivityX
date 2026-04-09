@@ -55,6 +55,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/listid `ID` — установить ID списка Twitter\n"
         "/key `ключ` — сменить OpenRouter API ключ\n"
         "/models — список моделей / сменить\n"
+        "/models test — тест бесплатных моделей\n"
         "/time `18:05 20:49` — расписание скана (МСК)\n"
         "/time `20` — интервал каждые N мин\n"
         "/sleep `02:00-05:00` — время сна (МСК)\n"
@@ -283,10 +284,94 @@ def _build_model_chunks(models: list[dict], header: str, current: str, show_pric
     return chunks
 
 
+async def _test_single_model(model_id: str, api_key: str) -> tuple[str, bool, str]:
+    """Test a single model. Returns (model_id, success, detail)."""
+    import httpx
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model_id,
+                    "messages": [{"role": "user", "content": "Hi, respond with OK"}],
+                    "max_tokens": 10,
+                    "temperature": 0,
+                },
+                timeout=60,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                return (model_id, True, text[:30])
+            else:
+                return (model_id, False, f"HTTP {resp.status_code}")
+    except Exception as e:
+        return (model_id, False, str(e)[:40])
+
+
+async def cmd_models_test(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Test all free models one by one and report which are active."""
+    api_key = get_api_key()
+    if not api_key:
+        return await update.message.reply_text("❌ API ключ не установлен. /key")
+
+    msg = await update.message.reply_text("⏳ Загружаю список бесплатных моделей...")
+
+    free, _ = await _fetch_all_models()
+    if not free:
+        return await msg.edit_text("❌ Не удалось загрузить модели")
+
+    await msg.edit_text(f"🧪 Тестирую **{len(free)}** бесплатных моделей...\nЭто займёт пару минут.", parse_mode="Markdown")
+
+    active = []
+    failed = []
+
+    for i, m in enumerate(free):
+        model_id = m["id"]
+        success, detail = (await _test_single_model(model_id, api_key))[1:]
+        if success:
+            active.append(model_id)
+        else:
+            failed.append((model_id, detail))
+        # Progress update every 5 models
+        if (i + 1) % 5 == 0:
+            try:
+                await msg.edit_text(
+                    f"🧪 Тестирую... {i+1}/{len(free)}\n"
+                    f"✅ {len(active)} активных | ❌ {len(failed)} неактивных",
+                    parse_mode="Markdown",
+                )
+            except Exception:
+                pass
+
+    # Build result
+    text = f"🧪 **Тест моделей завершён**\n\n"
+    text += f"✅ **Активные ({len(active)}):**\n"
+    for m_id in active:
+        text += f"  • `{m_id}`\n"
+
+    if failed:
+        text += f"\n❌ **Неактивные ({len(failed)}):**\n"
+        for m_id, reason in failed:
+            text += f"  • `{m_id}` — {reason}\n"
+
+    # Send as push (new message, not edit) so it's visible
+    if len(text) > 4000:
+        text = text[:3950] + "\n\n... (обрезано)"
+
+    await msg.edit_text(text, parse_mode="Markdown")
+
+
 async def cmd_models(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return
     if ctx.args:
+        if ctx.args[0].lower() == "test":
+            return await cmd_models_test(update, ctx)
         model_name = " ".join(ctx.args).strip()
         set_model(model_name)
         return await update.message.reply_text(f"✅ Модель: `{model_name}`", parse_mode="Markdown")
