@@ -76,9 +76,12 @@
     "username": "bybit_official",
     "source": "manual",
     "tags": [
-      "winners"
+      "winners",
+      "winners+usdt"
     ],
-    "exclusions": []
+    "exclusions": [
+      "trade"
+    ]
   },
   {
     "username": "aeon_community",
@@ -160,6 +163,20 @@
     "tags": [
       "winners"
     ],
+    "exclusions": []
+  },
+  {
+    "username": "binance_intern",
+    "source": "list",
+    "tags": [
+      "winners"
+    ],
+    "exclusions": []
+  },
+  {
+    "username": "cryptoharis",
+    "source": "manual",
+    "tags": [],
     "exclusions": []
   }
 ]
