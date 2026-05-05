@@ -178,5 +178,13 @@
     "source": "manual",
     "tags": [],
     "exclusions": []
+  },
+  {
+    "username": "crypto__haris",
+    "source": "list",
+    "tags": [
+      "winners"
+    ],
+    "exclusions": []
   }
 ]
