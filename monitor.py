@@ -123,14 +123,20 @@ async def sync_members(app: Application) -> set[str] | None:
     new_users = list_members - monitored
     for new_user in sorted(new_users):
         db.add_account(new_user, source="list")
-        db.add_account_keyword(new_user, "winners")
-        logger.info(f"Auto-added @{new_user} with default tag 'winners'")
+        logger.info(f"Auto-added @{new_user} from list")
         if TG_CHAT_ID:
             try:
+                from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+                keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🏷 Настроить теги", callback_data=f"page:{new_user}")],
+                    [InlineKeyboardButton("🚫 Исключения", callback_data=f"addexcl:{new_user}"),
+                     InlineKeyboardButton("⏭ Пропустить", callback_data=f"syncskip:{new_user}")],
+                ])
                 await app.bot.send_message(
                     chat_id=TG_CHAT_ID,
-                    text=f"🆕 Новый аккаунт из списка: **@{new_user}**\nТег по умолчанию: `winners`\nНастроить: /pages",
+                    text=f"🆕 **@{new_user}** добавлен из Twitter-списка!\n\nДобавь теги и исключения для фильтрации:",
                     parse_mode="Markdown",
+                    reply_markup=keyboard,
                 )
             except Exception:
                 pass

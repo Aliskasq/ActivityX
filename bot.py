@@ -49,7 +49,8 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/list — список с тегами\n"
         "/pages — управление тегами (кнопки)\n"
         "/sync — сравнить бот с Twitter-списком\n"
-        "/git — запушить аккаунты/теги на GitHub\n\n"
+        "/git — запушить аккаунты/теги на GitHub\n"
+        "/gitkey `токен` — сменить GitHub токен\n\n"
         "**Настройки:**\n"
         "/cookies — загрузить куки Twitter\n"
         "/listid `ID` — установить ID списка Twitter\n"
@@ -580,6 +581,15 @@ async def callback_removeacc(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("📋 Все аккаунты удалены.")
 
 
+async def callback_syncskip(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    username = query.data.split(":", 1)[1]
+    await query.answer("Пропущено")
+    await query.edit_message_text(
+        f"⏭ @{username} — добавлен без фильтров\nНастроить позже: /pages"
+    )
+
+
 async def callback_noop(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
 
@@ -726,7 +736,7 @@ async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # --- Sync ---
 
 async def cmd_sync(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Manual sync: compare bot accounts with actual Twitter list members."""
+    """Manual sync: compare bot with Twitter list, auto-add new members."""
     if not is_admin(update.effective_user.id):
         return
     await update.message.reply_text("🔄 Загружаю участников списка...")
@@ -746,11 +756,15 @@ async def cmd_sync(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     only_in_bot = sorted(monitored - list_members)
     in_both = sorted(list_members & monitored)
 
+    # Auto-add new users from list
+    for username in only_in_list:
+        db.add_account(username, source="list")
+
     text = f"📊 **Синхронизация**\n\n"
     text += f"✅ В списке и в боте: **{len(in_both)}**\n"
 
     if only_in_list:
-        text += f"\n🆕 **В списке, но НЕ в боте ({len(only_in_list)}):**\n"
+        text += f"\n🆕 **Добавлены в бот ({len(only_in_list)}):**\n"
         for u in only_in_list:
             text += f"  • @{u}\n"
 
@@ -769,8 +783,76 @@ async def cmd_sync(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(text, parse_mode="Markdown")
 
+    # Send button per new user to configure tags/exclusions
+    for username in only_in_list:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🏷 Настроить теги", callback_data=f"page:{username}")],
+            [InlineKeyboardButton("🚫 Исключения", callback_data=f"addexcl:{username}"),
+             InlineKeyboardButton("⏭ Пропустить", callback_data=f"syncskip:{username}")],
+        ])
+        await update.message.reply_text(
+            f"🆕 **@{username}** — настрой фильтры:",
+            reply_markup=keyboard,
+            parse_mode="Markdown",
+        )
+
 
 # --- Git push ---
+
+async def cmd_gitkey(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Update GitHub token used for git push."""
+    if not is_admin(update.effective_user.id):
+        return
+    if not ctx.args:
+        return await update.message.reply_text(
+            "🔑 **GitHub токен**\n\n"
+            "Установить: `/gitkey ghp_xxxxxxxxxxxx`\n\n"
+            "Создать токен: GitHub → Settings → Developer settings → "
+            "Personal access tokens → Fine-grained tokens\n"
+            "Права: Contents (Read and Write)",
+            parse_mode="Markdown",
+        )
+
+    token = ctx.args[0].strip()
+
+    # Update git remote URL with new token
+    try:
+        bot_dir = os.path.dirname(os.path.abspath(__file__))
+
+        # Get current remote URL
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=bot_dir, capture_output=True, text=True,
+        )
+        old_url = result.stdout.strip()
+
+        # Build new URL: https://<token>@github.com/<user>/<repo>.git
+        import re
+        # Strip any existing token/credentials from URL
+        clean_url = re.sub(r'https://[^@]+@', 'https://', old_url)
+        clean_url = clean_url.replace('https://', '')
+        new_url = f"https://{token}@{clean_url}"
+
+        subprocess.run(
+            ["git", "remote", "set-url", "origin", new_url],
+            cwd=bot_dir, check=True, capture_output=True,
+        )
+
+        # Save to .env
+        from config import _save_env
+        _save_env("GITHUB_TOKEN", token)
+
+        # Delete the message with the token for security
+        try:
+            await update.message.delete()
+        except Exception:
+            pass
+
+        await update.effective_chat.send_message("✅ GitHub токен обновлён! Попробуй /git")
+
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка: {e}")
+
 
 async def cmd_git(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Export accounts/tags/exclusions to JSON and push to GitHub."""
@@ -888,7 +970,7 @@ def setup_handlers(app: Application):
         ("remove", cmd_remove), ("list", cmd_list), ("pages", cmd_pages),
         ("key", cmd_key), ("models", cmd_models), ("listid", cmd_listid),
         ("status", cmd_status), ("time", cmd_time), ("sleep", cmd_sleep),
-        ("sync", cmd_sync), ("git", cmd_git),
+        ("sync", cmd_sync), ("git", cmd_git), ("gitkey", cmd_gitkey),
     ]:
         app.add_handler(CommandHandler(cmd, fn))
 
@@ -896,5 +978,6 @@ def setup_handlers(app: Application):
     app.add_handler(CallbackQueryHandler(callback_page, pattern=r"^page:"))
     app.add_handler(CallbackQueryHandler(callback_deltag, pattern=r"^deltag:"))
     app.add_handler(CallbackQueryHandler(callback_delexcl, pattern=r"^delexcl:"))
+    app.add_handler(CallbackQueryHandler(callback_syncskip, pattern=r"^syncskip:"))
     app.add_handler(CallbackQueryHandler(callback_back, pattern=r"^back:"))
     app.add_handler(CallbackQueryHandler(callback_noop, pattern=r"^noop:"))
