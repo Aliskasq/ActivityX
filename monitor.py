@@ -191,14 +191,6 @@ async def _daily_cleanup(app: Application):
     deleted = db.cleanup_old(days=7)
     if deleted:
         logger.info(f"🧹 Cleanup: deleted {deleted} seen tweets older than 7 days")
-        if TG_CHAT_ID:
-            try:
-                await app.bot.send_message(
-                    chat_id=TG_CHAT_ID,
-                    text=f"🧹 Очистка: удалено {deleted} старых твитов (>7 дней)",
-                )
-            except Exception:
-                pass
 
 
 async def monitor_loop(app: Application):
