@@ -348,25 +348,35 @@ async def fetch_user_tweets(username: str) -> list[Tweet]:
     return []
 
 
+def _word_in_text(word: str, text: str) -> bool:
+    """Check if word appears in text as a whole word (not substring).
+
+    Uses regex word boundaries so 'rt' won't match inside 'part',
+    but 'giveaway' will still match 'giveaway!' (punctuation boundary).
+    """
+    import re
+    return bool(re.search(r'\b' + re.escape(word) + r'\b', text))
+
+
 def matches_keywords(tweet: Tweet, keywords: list[str], exclusions: list[str] | None = None) -> bool:
     """Check if tweet matches keyword rules and doesn't hit exclusions."""
     text_lower = tweet.text.lower()
 
     if exclusions:
         for ex in exclusions:
-            if ex.lower() in text_lower:
+            if _word_in_text(ex.lower(), text_lower):
                 return False
 
     if not keywords:
-        return True
+        return False
 
     for kw in keywords:
         kw_lower = kw.lower()
         if "+" in kw_lower:
             parts = [p.strip() for p in kw_lower.split("+") if p.strip()]
-            if parts and all(part in text_lower for part in parts):
+            if parts and all(_word_in_text(part, text_lower) for part in parts):
                 return True
         else:
-            if kw_lower in text_lower:
+            if _word_in_text(kw_lower, text_lower):
                 return True
     return False

@@ -237,11 +237,18 @@ async def monitor_loop(app: Application):
                 acct_keywords = db.list_account_keywords(tweet.username)
                 acct_exclusions = db.list_account_exclusions(tweet.username)
 
-                if not matches_keywords(tweet, acct_keywords, acct_exclusions):
+                is_match = matches_keywords(tweet, acct_keywords, acct_exclusions)
+                logger.info(
+                    f"@{tweet.username}/{tweet.tweet_id} match={is_match} "
+                    f"kw={acct_keywords} excl={acct_exclusions} "
+                    f"text={tweet.text[:100]!r}"
+                )
+
+                if not is_match:
                     db.mark_seen(tweet.tweet_id, tweet.username, tweet.text)
                     continue
 
-                logger.info(f"Match! @{tweet.username}: {tweet.tweet_id}")
+                logger.info(f"✅ Match! @{tweet.username}: {tweet.tweet_id}")
                 matched.append(tweet)
                 db.mark_seen(tweet.tweet_id, tweet.username, tweet.text)
 
