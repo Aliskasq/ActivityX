@@ -226,11 +226,17 @@ async def monitor_loop(app: Application):
             logger.info(f"Processing {len(tweets)} tweets...")
             matched = []
 
+            new_count = 0
+            skip_seen = 0
+            skip_unmonitored = 0
             for tweet in tweets:
                 if db.is_seen(tweet.tweet_id):
+                    skip_seen += 1
                     continue
 
+                new_count += 1
                 if tweet.username not in monitored:
+                    skip_unmonitored += 1
                     db.mark_seen(tweet.tweet_id, tweet.username, tweet.text)
                     continue
 
@@ -252,6 +258,11 @@ async def monitor_loop(app: Application):
                 matched.append(tweet)
                 db.mark_seen(tweet.tweet_id, tweet.username, tweet.text)
 
+            logger.info(
+                f"Scan summary: {len(tweets)} total, {skip_seen} seen, "
+                f"{new_count} new, {skip_unmonitored} unmonitored, "
+                f"{len(matched)} matched"
+            )
             if matched:
                 logger.info(f"Processing {len(matched)} matched tweets through AI...")
             for tweet in matched:
