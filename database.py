@@ -285,11 +285,38 @@ def deduplicate_accounts():
     conn.close()
 
 
-def cleanup_old(days: int = 7):
+def cleanup_old(days: int = 7) -> int:
+    """Delete seen tweets older than N days. Returns count deleted."""
     conn = get_db()
-    conn.execute(
+    cur = conn.execute(
         "DELETE FROM seen_tweets WHERE seen_at < datetime('now', ?)",
         (f"-{days} days",),
     )
+    deleted = cur.rowcount
     conn.commit()
     conn.close()
+    return deleted
+
+
+def seen_stats() -> list[dict]:
+    """Per-account stats for seen tweets (total, matched/sent, last seen)."""
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT 
+            s.username,
+            COUNT(*) as total,
+            MIN(s.seen_at) as first_seen,
+            MAX(s.seen_at) as last_seen
+        FROM seen_tweets s
+        GROUP BY s.username
+        ORDER BY total DESC
+    """).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def seen_total() -> int:
+    conn = get_db()
+    row = conn.execute("SELECT COUNT(*) as cnt FROM seen_tweets").fetchone()
+    conn.close()
+    return row["cnt"]

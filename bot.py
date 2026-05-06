@@ -49,6 +49,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/list — список с тегами\n"
         "/pages — управление тегами (кнопки)\n"
         "/sync — сравнить бот с Twitter-списком\n"
+        "/stats — статистика сканов по аккаунтам\n"
         "/git — запушить аккаунты/теги на GitHub\n"
         "/gitkey `токен` — сменить GitHub токен\n\n"
         "**Настройки:**\n"
@@ -733,6 +734,46 @@ async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
 
 
+# --- Stats ---
+
+async def cmd_stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Show per-account scan stats from seen_tweets."""
+    if not is_admin(update.effective_user.id):
+        return
+
+    stats = db.seen_stats()
+    total = db.seen_total()
+
+    if not stats:
+        return await update.message.reply_text("📊 Нет данных — ещё не было сканов.")
+
+    # Build per-account lines
+    lines = []
+    monitored = set(db.list_accounts())
+    for s in stats:
+        username = s["username"]
+        is_mon = "✅" if username in monitored else "❌"
+        kw_count = len(db.list_account_keywords(username))
+        tags_str = f"{kw_count} тегов" if kw_count else "⚠️ без тегов"
+        lines.append(
+            f"{is_mon} **@{username}** — {s['total']} твитов, {tags_str}\n"
+            f"    📅 {s['last_seen'][:16]}"
+        )
+
+    # Split into chunks if too long
+    header = f"📊 **Статистика сканов**\n\n🗃 Всего в базе: **{total}** твитов\n\n"
+    text = header
+
+    for line in lines:
+        if len(text) + len(line) + 2 > 3900:
+            await update.message.reply_text(text, parse_mode="Markdown")
+            text = ""
+        text += line + "\n"
+
+    if text.strip():
+        await update.message.reply_text(text, parse_mode="Markdown")
+
+
 # --- Sync ---
 
 async def cmd_sync(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -969,7 +1010,8 @@ def setup_handlers(app: Application):
         ("start", cmd_start), ("help", cmd_start), ("add", cmd_add),
         ("remove", cmd_remove), ("list", cmd_list), ("pages", cmd_pages),
         ("key", cmd_key), ("models", cmd_models), ("listid", cmd_listid),
-        ("status", cmd_status), ("time", cmd_time), ("sleep", cmd_sleep),
+        ("status", cmd_status), ("stats", cmd_stats),
+        ("time", cmd_time), ("sleep", cmd_sleep),
         ("sync", cmd_sync), ("git", cmd_git), ("gitkey", cmd_gitkey),
     ]:
         app.add_handler(CommandHandler(cmd, fn))

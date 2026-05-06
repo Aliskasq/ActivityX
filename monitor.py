@@ -14,6 +14,9 @@ logger = logging.getLogger(__name__)
 
 MSK = timezone(timedelta(hours=3))
 
+# Track cleanup state
+_last_cleanup_date: str | None = None
+
 # Track error state to avoid spamming
 _last_error_notified: str | None = None
 # Track manual-not-in-list notifications (only send once per user)
@@ -175,6 +178,29 @@ async def sync_members(app: Application) -> set[str] | None:
     return list_members
 
 
+async def _daily_cleanup(app: Application):
+    """Delete seen tweets older than 7 days. Runs once per day after 00:00 MSK."""
+    global _last_cleanup_date
+    today = datetime.now(MSK).strftime("%Y-%m-%d")
+    if _last_cleanup_date == today:
+        return
+    now_msk = datetime.now(MSK)
+    if now_msk.hour < 0 or (now_msk.hour == 0 and now_msk.minute < 0):
+        return
+    _last_cleanup_date = today
+    deleted = db.cleanup_old(days=7)
+    if deleted:
+        logger.info(f"🧹 Cleanup: deleted {deleted} seen tweets older than 7 days")
+        if TG_CHAT_ID:
+            try:
+                await app.bot.send_message(
+                    chat_id=TG_CHAT_ID,
+                    text=f"🧹 Очистка: удалено {deleted} старых твитов (>7 дней)",
+                )
+            except Exception:
+                pass
+
+
 async def monitor_loop(app: Application):
     """Main loop: fetch list tweets on schedule, filter by per-account tags."""
     logger.info("Monitor loop started")
@@ -194,6 +220,9 @@ async def monitor_loop(app: Application):
                 logger.info(f"💤 Sleep mode — wake in {wake_in/60:.0f} min")
                 await asyncio.sleep(min(wake_in, 300))
                 continue
+
+            # Daily cleanup of old seen tweets
+            await _daily_cleanup(app)
 
             # Sync members with actual Twitter list (every scan)
             await sync_members(app)
