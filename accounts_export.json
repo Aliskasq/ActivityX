@@ -73,17 +73,6 @@
     "exclusions": []
   },
   {
-    "username": "bybit_official",
-    "source": "manual",
-    "tags": [
-      "winners",
-      "winners+usdt"
-    ],
-    "exclusions": [
-      "trade"
-    ]
-  },
-  {
     "username": "aeon_community",
     "source": "manual",
     "tags": [
@@ -174,17 +163,74 @@
     "exclusions": []
   },
   {
-    "username": "cryptoharis",
-    "source": "manual",
-    "tags": [],
+    "username": "crypto__haris",
+    "source": "list",
+    "tags": [
+      "winners",
+      "giveaway",
+      "drop+uid"
+    ],
     "exclusions": []
   },
   {
-    "username": "crypto__haris",
+    "username": "binanceangels",
+    "source": "list",
+    "tags": [
+      "follow+usdc"
+    ],
+    "exclusions": []
+  },
+  {
+    "username": "nihilusbtc",
+    "source": "list",
+    "tags": [
+      "giveaway"
+    ],
+    "exclusions": []
+  },
+  {
+    "username": "okx",
+    "source": "list",
+    "tags": [
+      "follow+usdt",
+      "follow+usdc",
+      "winners"
+    ],
+    "exclusions": [
+      "trade"
+    ]
+  },
+  {
+    "username": "drazelab",
+    "source": "list",
+    "tags": [
+      "giveaway",
+      "winners"
+    ],
+    "exclusions": []
+  },
+  {
+    "username": "bybitafrica",
     "source": "list",
     "tags": [
       "winners"
     ],
+    "exclusions": [
+      "ama"
+    ]
+  },
+  {
+    "username": "binancedesi",
+    "source": "list",
+    "tags": [
+      "winners"
+    ],
+    "exclusions": []
+  },
+  {
+    "username": "bybit_official",
+    "source": "list",
+    "tags": [],
     "exclusions": []
   }
 ]
