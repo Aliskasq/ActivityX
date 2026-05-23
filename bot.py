@@ -25,6 +25,13 @@ import database as db
 
 logger = logging.getLogger(__name__)
 
+
+def escape_md(text: str) -> str:
+    """Escape Telegram Markdown v1 special characters."""
+    for ch in ('\\', '`', '*', '_', '[', ']', '(', ')'):
+        text = text.replace(ch, f'\\{ch}')
+    return text
+
 WAITING_TAG = 1
 WAITING_EXCLUSION = 2
 WAITING_COOKIES = 3
@@ -468,10 +475,11 @@ async def show_account_tags(query, username: str):
     ])
     buttons.append([InlineKeyboardButton("⬅️ Назад", callback_data="back:pages")])
 
-    tag_text = "\n".join(f"  🏷 {t}" for t in tags) if tags else "  нет"
-    excl_text = "\n".join(f"  🚫 {e}" for e in exclusions) if exclusions else "  нет"
+    tag_text = "\n".join(f"  🏷 {escape_md(t)}" for t in tags) if tags else "  нет"
+    excl_text = "\n".join(f"  🚫 {escape_md(e)}" for e in exclusions) if exclusions else "  нет"
+    safe_user = escape_md(username)
     await query.edit_message_text(
-        f"🐦 **@{username}**\n\n**Теги:**\n{tag_text}\n\n**Исключения:**\n{excl_text}\n\n_+ = оба слова_",
+        f"🐦 **@{safe_user}**\n\n**Теги:**\n{tag_text}\n\n**Исключения:**\n{excl_text}\n\n_\\+ = оба слова_",
         reply_markup=InlineKeyboardMarkup(buttons),
         parse_mode="Markdown",
     )
