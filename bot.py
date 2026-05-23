@@ -26,12 +26,6 @@ import database as db
 logger = logging.getLogger(__name__)
 
 
-def escape_md(text: str) -> str:
-    """Escape Telegram Markdown v1 special characters."""
-    for ch in ('\\', '`', '*', '_', '[', ']', '(', ')'):
-        text = text.replace(ch, f'\\{ch}')
-    return text
-
 WAITING_TAG = 1
 WAITING_EXCLUSION = 2
 WAITING_COOKIES = 3
@@ -49,27 +43,26 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return
     await update.message.reply_text(
-        "🐦 **Twitter Monitor Bot**\n\n"
-        "**Аккаунты:**\n"
-        "/add `@username` — добавить\n"
+        "🐦 Twitter Monitor Bot\n\n"
+        "Аккаунты:\n"
+        "/add @username — добавить\n"
         "/remove — удалить (кнопки)\n"
         "/list — список с тегами\n"
         "/pages — управление тегами (кнопки)\n"
         "/sync — сравнить бот с Twitter-списком\n"
         "/stats — статистика сканов по аккаунтам\n"
         "/git — запушить аккаунты/теги на GitHub\n"
-        "/gitkey `токен` — сменить GitHub токен\n\n"
-        "**Настройки:**\n"
+        "/gitkey токен — сменить GitHub токен\n\n"
+        "Настройки:\n"
         "/cookies — загрузить куки Twitter\n"
-        "/listid `ID` — установить ID списка Twitter\n"
-        "/key `ключ` — сменить OpenRouter API ключ\n"
+        "/listid ID — установить ID списка Twitter\n"
+        "/key ключ — сменить OpenRouter API ключ\n"
         "/models — список моделей / сменить\n"
         "/models test — тест бесплатных моделей\n"
-        "/time `18:05 20:49` — расписание скана (МСК)\n"
-        "/time `20` — интервал каждые N мин\n"
-        "/sleep `02:00-05:00` — время сна (МСК)\n"
+        "/time 18:05 20:49 — расписание скана (МСК)\n"
+        "/time 20 — интервал каждые N мин\n"
+        "/sleep 02:00-05:00 — время сна (МСК)\n"
         "/status — статус",
-        parse_mode="Markdown",
     )
 
 
@@ -98,9 +91,8 @@ async def cmd_remove(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not accounts:
         return await update.message.reply_text("📋 Список пуст.")
     await update.message.reply_text(
-        "🗑 **Выбери аккаунт для удаления:**",
+        "🗑 Выбери аккаунт для удаления:",
         reply_markup=build_remove_keyboard(accounts),
-        parse_mode="Markdown",
     )
 
 
@@ -110,7 +102,7 @@ async def cmd_list(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     accounts = db.list_accounts()
     if not accounts:
         return await update.message.reply_text("📋 Список пуст. /add @username")
-    text = "📋 **Аккаунты:**\n\n"
+    text = "📋 Аккаунты:\n\n"
     for i, acc in enumerate(accounts, 1):
         tags = db.list_account_keywords(acc)
         excl = db.list_account_exclusions(acc)
@@ -119,7 +111,7 @@ async def cmd_list(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if excl:
             line += f"\n   🚫 {', '.join(excl)}"
         text += line + "\n"
-    await update.message.reply_text(text, parse_mode="Markdown")
+    await update.message.reply_text(text)
 
 
 # --- Cookies ---
@@ -144,13 +136,12 @@ async def cmd_cookies(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     has_cookies = os.path.exists(COOKIES_PATH)
     status = "✅ Загружены" if has_cookies else "❌ Не загружены"
     await update.message.reply_text(
-        f"🍪 **Куки Twitter:** {status}\n\n"
+        f"🍪 Куки Twitter: {status}\n\n"
         f"Отправь JSON куки следующим сообщением:\n"
         f"1. Установи расширение Cookie-Editor\n"
         f"2. Зайди на x.com\n"
         f"3. Экспортируй куки (JSON)\n"
         f"4. Отправь сюда как сообщение",
-        parse_mode="Markdown",
     )
     ctx.user_data["waiting_cookies"] = True
     return WAITING_COOKIES
@@ -212,8 +203,7 @@ async def cmd_listid(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         from config import TWITTER_LIST_ID
         current = TWITTER_LIST_ID or "не установлен"
         return await update.message.reply_text(
-            f"📋 **List ID:** `{current}`\n\nУстановить: /listid 1234567890",
-            parse_mode="Markdown",
+            f"📋 List ID: {current}\n\nУстановить: /listid 1234567890",
         )
     list_id = ctx.args[0].strip()
     # Save to .env
@@ -224,7 +214,7 @@ async def cmd_listid(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     import monitor
     config.TWITTER_LIST_ID = list_id
     monitor.TWITTER_LIST_ID = list_id
-    await update.message.reply_text(f"✅ List ID: `{list_id}` — применён!", parse_mode="Markdown")
+    await update.message.reply_text(f"✅ List ID: {list_id} — применён!")
 
 
 # --- Key management ---
@@ -235,7 +225,7 @@ async def cmd_key(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not ctx.args:
         current = get_api_key()
         masked = current[:10] + "..." + current[-4:] if len(current) > 14 else "не установлен"
-        return await update.message.reply_text(f"🔑 Ключ: `{masked}`\n\nСменить: /key новый\\_ключ", parse_mode="Markdown")
+        return await update.message.reply_text(f"🔑 Ключ: {masked}\n\nСменить: /key новый_ключ")
     set_api_key(ctx.args[0].strip())
     await update.message.reply_text("✅ API ключ обновлён")
 
@@ -284,9 +274,9 @@ def _build_model_chunks(models: list[dict], header: str, current: str, show_pric
         if show_price:
             p_in = m['price_in'] * 1_000_000
             p_out = m['price_out'] * 1_000_000
-            line = f"{i}. {marker}`{m['id']}`\n    {m['name']} ({ctx_k}k) — ${p_in:.2f}/${p_out:.2f} per 1M tok\n"
+            line = f"{i}. {marker}{m['id']}\n    {m['name']} ({ctx_k}k) — ${p_in:.2f}/${p_out:.2f} per 1M tok\n"
         else:
-            line = f"{i}. {marker}`{m['id']}`\n    {m['name']} ({ctx_k}k)\n"
+            line = f"{i}. {marker}{m['id']}\n    {m['name']} ({ctx_k}k)\n"
         if len(chunks[-1]) + len(line) > 3800:
             chunks.append("")
         chunks[-1] += line
@@ -334,7 +324,7 @@ async def cmd_models_test(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not free:
         return await msg.edit_text("❌ Не удалось загрузить модели")
 
-    await msg.edit_text(f"🧪 Тестирую **{len(free)}** бесплатных моделей...\nЭто займёт пару минут.", parse_mode="Markdown")
+    await msg.edit_text(f"🧪 Тестирую {len(free)} бесплатных моделей...\nЭто займёт пару минут.")
 
     active = []
     failed = []
@@ -352,27 +342,26 @@ async def cmd_models_test(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await msg.edit_text(
                     f"🧪 Тестирую... {i+1}/{len(free)}\n"
                     f"✅ {len(active)} активных | ❌ {len(failed)} неактивных",
-                    parse_mode="Markdown",
                 )
             except Exception:
                 pass
 
     # Build result
-    text = f"🧪 **Тест моделей завершён**\n\n"
-    text += f"✅ **Активные ({len(active)}):**\n"
+    text = f"🧪 Тест моделей завершён\n\n"
+    text += f"✅ Активные ({len(active)}):\n"
     for m_id in active:
-        text += f"  • `{m_id}`\n"
+        text += f"  • {m_id}\n"
 
     if failed:
-        text += f"\n❌ **Неактивные ({len(failed)}):**\n"
+        text += f"\n❌ Неактивные ({len(failed)}):\n"
         for m_id, reason in failed:
-            text += f"  • `{m_id}` — {reason}\n"
+            text += f"  • {m_id} — {reason}\n"
 
     # Send as push (new message, not edit) so it's visible
     if len(text) > 4000:
         text = text[:3950] + "\n\n... (обрезано)"
 
-    await msg.edit_text(text, parse_mode="Markdown")
+    await msg.edit_text(text)
 
 
 async def cmd_models(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -383,7 +372,7 @@ async def cmd_models(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             return await cmd_models_test(update, ctx)
         model_name = " ".join(ctx.args).strip()
         set_model(model_name)
-        return await update.message.reply_text(f"✅ Модель: `{model_name}`", parse_mode="Markdown")
+        return await update.message.reply_text(f"✅ Модель: {model_name}")
 
     await update.message.reply_text("⏳ Загружаю список моделей...")
 
@@ -395,18 +384,18 @@ async def cmd_models(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # Free models
     if free:
-        header = f"🤖 **Текущая:** `{current}`\n\n🆓 **Бесплатные ({len(free)}):**\n\n"
+        header = f"🤖 Текущая: {current}\n\n🆓 Бесплатные ({len(free)}):\n\n"
         chunks = _build_model_chunks(free, header, current)
-        chunks[-1] += f"\nСменить: `/models название`"
+        chunks[-1] += f"\nСменить: /models название"
         for chunk in chunks:
-            await update.message.reply_text(chunk, parse_mode="Markdown")
+            await update.message.reply_text(chunk)
 
     # Paid models
     if paid:
-        header = f"💰 **Платные ({len(paid)}):**\n\n"
+        header = f"💰 Платные ({len(paid)}):\n\n"
         chunks = _build_model_chunks(paid, header, current, show_price=True)
         for chunk in chunks:
-            await update.message.reply_text(chunk, parse_mode="Markdown")
+            await update.message.reply_text(chunk)
 
 
 # --- Pages ---
@@ -418,9 +407,8 @@ async def cmd_pages(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not accounts:
         return await update.message.reply_text("Нет аккаунтов. /add @username")
     await update.message.reply_text(
-        "📄 **Выбери аккаунт:**",
+        "📄 Выбери аккаунт:",
         reply_markup=build_pages_keyboard(accounts),
-        parse_mode="Markdown",
     )
 
 
@@ -475,13 +463,11 @@ async def show_account_tags(query, username: str):
     ])
     buttons.append([InlineKeyboardButton("⬅️ Назад", callback_data="back:pages")])
 
-    tag_text = "\n".join(f"  🏷 {escape_md(t)}" for t in tags) if tags else "  нет"
-    excl_text = "\n".join(f"  🚫 {escape_md(e)}" for e in exclusions) if exclusions else "  нет"
-    safe_user = escape_md(username)
+    tag_text = "\n".join(f"  🏷 {t}" for t in tags) if tags else "  нет"
+    excl_text = "\n".join(f"  🚫 {e}" for e in exclusions) if exclusions else "  нет"
     await query.edit_message_text(
-        f"🐦 **@{safe_user}**\n\n**Теги:**\n{tag_text}\n\n**Исключения:**\n{excl_text}\n\n_\\+ = оба слова_",
+        f"🐦 @{username}\n\nТеги:\n{tag_text}\n\nИсключения:\n{excl_text}\n\n+ = оба слова",
         reply_markup=InlineKeyboardMarkup(buttons),
-        parse_mode="Markdown",
     )
 
 
@@ -507,8 +493,7 @@ async def callback_addtag(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     username = query.data.split(":", 1)[1]
     ctx.user_data["adding_tag_for"] = username
     await query.edit_message_text(
-        f"🏷 Введи тег для **@{escape_md(username)}**:\n_Примеры: giveaway, follow\\+repost_\n/cancel",
-        parse_mode="Markdown",
+        f"🏷 Введи тег для @{username}:\nПримеры: giveaway, follow+repost\n/cancel",
     )
     return WAITING_TAG
 
@@ -520,8 +505,7 @@ async def callback_addexcl(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     ctx.user_data["adding_tag_for"] = username
     ctx.user_data["adding_mode"] = "exclusion"
     await query.edit_message_text(
-        f"🚫 Введи исключение для **@{escape_md(username)}**:\n/cancel",
-        parse_mode="Markdown",
+        f"🚫 Введи исключение для @{username}:\n/cancel",
     )
     return WAITING_EXCLUSION
 
@@ -536,7 +520,7 @@ async def receive_tag(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     db.add_account_keyword(username, tag)
     await update.message.reply_text(f"✅ {tag} → @{username}")
     ctx.user_data.clear()
-    await update.message.reply_text("📄 **Аккаунты:**", reply_markup=build_pages_keyboard(db.list_accounts()), parse_mode="Markdown")
+    await update.message.reply_text("📄 Аккаунты:", reply_markup=build_pages_keyboard(db.list_accounts()))
     return ConversationHandler.END
 
 
@@ -550,7 +534,7 @@ async def receive_exclusion(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     db.add_account_exclusion(username, word)
     await update.message.reply_text(f"✅ 🚫{word} → @{username}")
     ctx.user_data.clear()
-    await update.message.reply_text("📄 **Аккаунты:**", reply_markup=build_pages_keyboard(db.list_accounts()), parse_mode="Markdown")
+    await update.message.reply_text("📄 Аккаунты:", reply_markup=build_pages_keyboard(db.list_accounts()))
     return ConversationHandler.END
 
 
@@ -571,7 +555,7 @@ async def callback_back(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if target == "cancel":
         await query.edit_message_text("Отменено.")
     else:
-        await query.edit_message_text("📄 **Аккаунты:**", reply_markup=build_pages_keyboard(db.list_accounts()), parse_mode="Markdown")
+        await query.edit_message_text("📄 Аккаунты:", reply_markup=build_pages_keyboard(db.list_accounts()))
 
 
 async def callback_removeacc(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -582,9 +566,8 @@ async def callback_removeacc(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     accounts = db.list_accounts()
     if accounts:
         await query.edit_message_text(
-            "🗑 **Удалён @" + username + "**\n\nУдалить ещё:",
+            "🗑 Удалён @" + username + "\n\nУдалить ещё:",
             reply_markup=build_remove_keyboard(accounts),
-            parse_mode="Markdown",
         )
     else:
         await query.edit_message_text("📋 Все аккаунты удалены.")
@@ -614,25 +597,23 @@ async def cmd_time(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         mode = get_schedule_mode()
         if mode == "interval":
             return await update.message.reply_text(
-                f"⏰ **Режим:** каждые {get_interval_min()} мин\n\n"
-                f"**Задать расписание (МСК):**\n"
-                f"`/time 18:05 18:38 20:49 03:00`\n\n"
-                f"**Задать интервал:**\n"
-                f"`/time 20` — каждые 20 мин\n"
-                f"`/time 45` — каждые 45 мин",
-                parse_mode="Markdown",
+                f"⏰ Режим: каждые {get_interval_min()} мин\n\n"
+                f"Задать расписание (МСК):\n"
+                f"/time 18:05 18:38 20:49 03:00\n\n"
+                f"Задать интервал:\n"
+                f"/time 20 — каждые 20 мин\n"
+                f"/time 45 — каждые 45 мин",
             )
         else:
             times = get_schedule_times()
             times_str = "  ".join(times) if times else "—"
             return await update.message.reply_text(
-                f"⏰ **Режим:** расписание (МСК)\n"
-                f"**Время:** `{times_str}`\n\n"
-                f"**Изменить:**\n"
-                f"`/time 18:05 20:00 03:00`\n\n"
-                f"**Задать интервал:**\n"
-                f"`/time 20` — каждые 20 мин",
-                parse_mode="Markdown",
+                f"⏰ Режим: расписание (МСК)\n"
+                f"Время: {times_str}\n\n"
+                f"Изменить:\n"
+                f"/time 18:05 20:00 03:00\n\n"
+                f"Задать интервал:\n"
+                f"/time 20 — каждые 20 мин",
             )
 
     import re
@@ -653,8 +634,7 @@ async def cmd_time(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             times.append(arg)
         else:
             return await update.message.reply_text(
-                f"❌ Неверный формат: `{arg}`\nИспользуй: `/time 18:05 20:49 03:00` или `/time 20`",
-                parse_mode="Markdown",
+                f"❌ Неверный формат: {arg}\nИспользуй: /time 18:05 20:49 03:00 или /time 20",
             )
 
     if not times:
@@ -663,9 +643,8 @@ async def cmd_time(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     set_schedule_times(times)
     times_str = "  ".join(times)
     await update.message.reply_text(
-        f"✅ Расписание (МСК): `{times_str}`\n"
+        f"✅ Расписание (МСК): {times_str}\n"
         f"Скан будет в указанное время.",
-        parse_mode="Markdown",
     )
 
 
@@ -680,16 +659,14 @@ async def cmd_sleep(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         window = get_sleep_window()
         if window:
             return await update.message.reply_text(
-                f"💤 **Сон:** `{window[0]}` — `{window[1]}` (МСК)\n\n"
-                f"Изменить: `/sleep 02:00-05:00`\n"
-                f"Отключить: `/sleep 0`",
-                parse_mode="Markdown",
+                f"💤 Сон: {window[0]} — {window[1]} (МСК)\n\n"
+                f"Изменить: /sleep 02:00-05:00\n"
+                f"Отключить: /sleep 0",
             )
         return await update.message.reply_text(
-            "💤 **Сон:** выключен\n\n"
-            "Включить: `/sleep 02:00-05:00`\n"
-            "Формат: `/sleep ЧЧ:ММ-ЧЧ:ММ` (МСК)",
-            parse_mode="Markdown",
+            "💤 Сон: выключен\n\n"
+            "Включить: /sleep 02:00-05:00\n"
+            "Формат: /sleep ЧЧ:ММ-ЧЧ:ММ (МСК)",
         )
 
     arg = " ".join(ctx.args).strip()
@@ -701,16 +678,14 @@ async def cmd_sleep(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     match = re.match(r"^(\d{1,2}:\d{2})\s*[-–]\s*(\d{1,2}:\d{2})$", arg)
     if not match:
         return await update.message.reply_text(
-            "❌ Формат: `/sleep 02:00-05:00` или `/sleep 0`",
-            parse_mode="Markdown",
+            "❌ Формат: /sleep 02:00-05:00 или /sleep 0",
         )
 
     start, end = match.group(1), match.group(2)
     set_sleep_window(start, end)
     await update.message.reply_text(
-        f"✅ Сон: `{start}` — `{end}` (МСК)\n"
+        f"✅ Сон: {start} — {end} (МСК)\n"
         f"Бот не парсит в это время.",
-        parse_mode="Markdown",
     )
 
 
@@ -731,14 +706,13 @@ async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     window = get_sleep_window()
     sleep_str = f"{window[0]}—{window[1]} МСК" if window else "выключен"
     await update.message.reply_text(
-        f"📊 **Статус**\n\n"
+        f"📊 Статус\n\n"
         f"Аккаунтов: {len(accounts)}\n"
         f"Куки: {'✅' if has_cookies else '❌'}\n"
-        f"List ID: `{TWITTER_LIST_ID or 'не установлен'}`\n"
-        f"Модель: `{get_model()}`\n"
+        f"List ID: {TWITTER_LIST_ID or 'не установлен'}\n"
+        f"Модель: {get_model()}\n"
         f"Расписание: {schedule_str}\n"
         f"Сон: {sleep_str}",
-        parse_mode="Markdown",
     )
 
 
@@ -764,22 +738,22 @@ async def cmd_stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         kw_count = len(db.list_account_keywords(username))
         tags_str = f"{kw_count} тегов" if kw_count else "⚠️ без тегов"
         lines.append(
-            f"{is_mon} **@{escape_md(username)}** — {s['total']} твитов, {tags_str}\n"
+            f"{is_mon} @{username} — {s['total']} твитов, {tags_str}\n"
             f"    📅 {s['last_seen'][:16]}"
         )
 
     # Split into chunks if too long
-    header = f"📊 **Статистика сканов**\n\n🗃 Всего в базе: **{total}** твитов\n\n"
+    header = f"📊 Статистика сканов\n\n🗃 Всего в базе: {total} твитов\n\n"
     text = header
 
     for line in lines:
         if len(text) + len(line) + 2 > 3900:
-            await update.message.reply_text(text, parse_mode="Markdown")
+            await update.message.reply_text(text)
             text = ""
         text += line + "\n"
 
     if text.strip():
-        await update.message.reply_text(text, parse_mode="Markdown")
+        await update.message.reply_text(text)
 
 
 # --- Sync ---
@@ -809,16 +783,16 @@ async def cmd_sync(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     for username in only_in_list:
         db.add_account(username, source="list")
 
-    text = f"📊 **Синхронизация**\n\n"
-    text += f"✅ В списке и в боте: **{len(in_both)}**\n"
+    text = f"📊 Синхронизация\n\n"
+    text += f"✅ В списке и в боте: {len(in_both)}\n"
 
     if only_in_list:
-        text += f"\n🆕 **Добавлены в бот ({len(only_in_list)}):**\n"
+        text += f"\n🆕 Добавлены в бот ({len(only_in_list)}):\n"
         for u in only_in_list:
             text += f"  • @{u}\n"
 
     if only_in_bot:
-        text += f"\n⚠️ **В боте, но НЕ в списке ({len(only_in_bot)}):**\n"
+        text += f"\n⚠️ В боте, но НЕ в списке ({len(only_in_bot)}):\n"
         for u in only_in_bot:
             source = db.get_account_source(u)
             tag = " (manual)" if source == "manual" else ""
@@ -830,7 +804,7 @@ async def cmd_sync(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if len(text) > 4000:
         text = text[:3950] + "\n\n... (обрезано)"
 
-    await update.message.reply_text(text, parse_mode="Markdown")
+    await update.message.reply_text(text)
 
     # Send button per new user to configure tags/exclusions
     for username in only_in_list:
@@ -840,9 +814,8 @@ async def cmd_sync(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
              InlineKeyboardButton("⏭ Пропустить", callback_data=f"syncskip:{username}")],
         ])
         await update.message.reply_text(
-            f"🆕 **@{escape_md(username)}** — настрой фильтры:",
+            f"🆕 @{username} — настрой фильтры:",
             reply_markup=keyboard,
-            parse_mode="Markdown",
         )
 
 
@@ -854,12 +827,11 @@ async def cmd_gitkey(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     if not ctx.args:
         return await update.message.reply_text(
-            "🔑 **GitHub токен**\n\n"
-            "Установить: `/gitkey ghp_xxxxxxxxxxxx`\n\n"
+            "🔑 GitHub токен\n\n"
+            "Установить: /gitkey ghp_xxxxxxxxxxxx\n\n"
             "Создать токен: GitHub → Settings → Developer settings → "
             "Personal access tokens → Fine-grained tokens\n"
             "Права: Contents (Read and Write)",
-            parse_mode="Markdown",
         )
 
     token = ctx.args[0].strip()
@@ -957,12 +929,11 @@ async def cmd_git(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text(
                 f"✅ Запушено на GitHub!\n"
-                f"📋 Аккаунтов: **{len(export)}**",
-                parse_mode="Markdown",
+                f"📋 Аккаунтов: {len(export)}",
             )
     except subprocess.CalledProcessError as e:
         stderr = e.stderr.decode() if e.stderr else str(e)
-        await update.message.reply_text(f"❌ Git ошибка:\n`{stderr[:500]}`", parse_mode="Markdown")
+        await update.message.reply_text(f"❌ Git ошибка:\n{stderr[:500]}")
     except Exception as e:
         await update.message.reply_text(f"❌ Ошибка: {e}")
 
@@ -970,10 +941,10 @@ async def cmd_git(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def send_tweet_to_chat(app: Application, chat_id: str | int, username: str,
                               tweet_url: str, ai_text: str):
     keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Открыть в X", url=tweet_url)]])
-    message = f"🐦 **@{escape_md(username)}**\n\n{ai_text}"
+    message = f"🐦 @{username}\n\n{ai_text}"
     if len(message) > 4000:
         message = message[:4000] + "..."
-    await app.bot.send_message(chat_id=chat_id, text=message, parse_mode="Markdown", reply_markup=keyboard)
+    await app.bot.send_message(chat_id=chat_id, text=message, reply_markup=keyboard)
 
 
 def setup_handlers(app: Application):
