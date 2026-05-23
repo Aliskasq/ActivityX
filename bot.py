@@ -507,7 +507,7 @@ async def callback_addtag(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     username = query.data.split(":", 1)[1]
     ctx.user_data["adding_tag_for"] = username
     await query.edit_message_text(
-        f"🏷 Введи тег для **@{username}**:\n_Примеры: giveaway, follow+repost_\n/cancel",
+        f"🏷 Введи тег для **@{escape_md(username)}**:\n_Примеры: giveaway, follow\\+repost_\n/cancel",
         parse_mode="Markdown",
     )
     return WAITING_TAG
@@ -520,7 +520,7 @@ async def callback_addexcl(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     ctx.user_data["adding_tag_for"] = username
     ctx.user_data["adding_mode"] = "exclusion"
     await query.edit_message_text(
-        f"🚫 Введи исключение для **@{username}**:\n/cancel",
+        f"🚫 Введи исключение для **@{escape_md(username)}**:\n/cancel",
         parse_mode="Markdown",
     )
     return WAITING_EXCLUSION
@@ -764,7 +764,7 @@ async def cmd_stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         kw_count = len(db.list_account_keywords(username))
         tags_str = f"{kw_count} тегов" if kw_count else "⚠️ без тегов"
         lines.append(
-            f"{is_mon} **@{username}** — {s['total']} твитов, {tags_str}\n"
+            f"{is_mon} **@{escape_md(username)}** — {s['total']} твитов, {tags_str}\n"
             f"    📅 {s['last_seen'][:16]}"
         )
 
@@ -840,7 +840,7 @@ async def cmd_sync(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
              InlineKeyboardButton("⏭ Пропустить", callback_data=f"syncskip:{username}")],
         ])
         await update.message.reply_text(
-            f"🆕 **@{username}** — настрой фильтры:",
+            f"🆕 **@{escape_md(username)}** — настрой фильтры:",
             reply_markup=keyboard,
             parse_mode="Markdown",
         )
@@ -970,7 +970,7 @@ async def cmd_git(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def send_tweet_to_chat(app: Application, chat_id: str | int, username: str,
                               tweet_url: str, ai_text: str):
     keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Открыть в X", url=tweet_url)]])
-    message = f"🐦 **@{username}**\n\n{ai_text}"
+    message = f"🐦 **@{escape_md(username)}**\n\n{ai_text}"
     if len(message) > 4000:
         message = message[:4000] + "..."
     await app.bot.send_message(chat_id=chat_id, text=message, parse_mode="Markdown", reply_markup=keyboard)
