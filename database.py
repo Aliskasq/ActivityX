@@ -292,6 +292,16 @@ def set_cached_user_id(username: str, rest_id: str):
     conn.close()
 
 
+def clear_seen() -> int:
+    """Delete all seen tweets. Returns count deleted."""
+    conn = get_db()
+    cur = conn.execute("DELETE FROM seen_tweets")
+    deleted = cur.rowcount
+    conn.commit()
+    conn.close()
+    return deleted
+
+
 def deduplicate_accounts():
     """Remove duplicate accounts (case-insensitive)."""
     conn = get_db()

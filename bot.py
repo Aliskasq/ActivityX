@@ -58,7 +58,8 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/gitkey токен — сменить GitHub токен\n\n"
         "Скан аккаунтов:\n"
         "/scan — окна скана и период\n"
-        "/scan_now — запустить скан вручную\n\n"
+        "/scan_now — запустить скан вручную\n"
+        "/reset_seen — сбросить просмотренные твиты\n\n"
         "Настройки:\n"
         "/cookies — загрузить куки Twitter\n"
         "/listid ID — установить ID списка Twitter\n"
@@ -1076,6 +1077,17 @@ async def callback_scan_back(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def cmd_reset_seen(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Clear all seen tweets so the next scan processes everything as new."""
+    if not is_admin(update.effective_user.id):
+        return
+    deleted = db.clear_seen()
+    await update.message.reply_text(
+        f"🗑 Сброшено {deleted} просмотренных твитов.\n\n"
+        f"Следующий скан обработает все твиты как новые.",
+    )
+
+
 async def cmd_scan_now(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Trigger a manual timeline scan."""
     if not is_admin(update.effective_user.id):
@@ -1157,7 +1169,7 @@ def setup_handlers(app: Application):
         ("key", cmd_key), ("models", cmd_models), ("listid", cmd_listid),
         ("status", cmd_status), ("stats", cmd_stats),
         ("time", cmd_time), ("sleep", cmd_sleep),
-        ("scan", cmd_scan), ("scan_now", cmd_scan_now),
+        ("scan", cmd_scan), ("scan_now", cmd_scan_now), ("reset_seen", cmd_reset_seen),
         ("sync", cmd_sync), ("git", cmd_git), ("gitkey", cmd_gitkey),
     ]:
         app.add_handler(CommandHandler(cmd, fn))
