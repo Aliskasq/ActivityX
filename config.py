@@ -92,6 +92,36 @@ def clear_sleep_window():
     set_setting("sleep_window", "0")
 
 
+def get_scan_windows() -> list[tuple[str, str]]:
+    """Return list of (start, end) scan windows in MSK, e.g. [('12:00','17:00'), ('21:00','02:00')]."""
+    from database import get_setting
+    raw = get_setting("scan_windows", "")
+    if not raw:
+        return []
+    windows = []
+    for part in raw.split(","):
+        part = part.strip()
+        if "-" in part:
+            s, e = part.split("-", 1)
+            windows.append((s.strip(), e.strip()))
+    return windows
+
+
+def set_scan_windows(windows_str: str):
+    from database import set_setting
+    set_setting("scan_windows", windows_str)
+
+
+def get_scan_period_min() -> int:
+    from database import get_setting
+    return int(get_setting("scan_period_min", "5"))
+
+
+def set_scan_period_min(minutes: int):
+    from database import set_setting
+    set_setting("scan_period_min", str(minutes))
+
+
 def _save_env(key: str, value: str):
     env_path = os.path.join(os.path.dirname(__file__), ".env")
     lines = []

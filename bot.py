@@ -19,6 +19,7 @@ from config import (
     get_schedule_mode, get_schedule_times, get_interval_min,
     set_schedule_times, set_interval_mode,
     get_sleep_window, set_sleep_window, clear_sleep_window,
+    get_scan_windows, set_scan_windows, get_scan_period_min, set_scan_period_min,
 )
 from scraper import _normalize_cookies
 import database as db
@@ -29,6 +30,8 @@ logger = logging.getLogger(__name__)
 WAITING_TAG = 1
 WAITING_EXCLUSION = 2
 WAITING_COOKIES = 3
+WAITING_SCAN_WINDOWS = 4
+WAITING_SCAN_PERIOD = 5
 
 
 def is_admin(user_id: int) -> bool:
@@ -53,6 +56,9 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/stats — статистика сканов по аккаунтам\n"
         "/git — запушить аккаунты/теги на GitHub\n"
         "/gitkey токен — сменить GitHub токен\n\n"
+        "Скан аккаунтов:\n"
+        "/scan — окна скана и период\n"
+        "/scan_now — запустить скан вручную\n\n"
         "Настройки:\n"
         "/cookies — загрузить куки Twitter\n"
         "/listid ID — установить ID списка Twitter\n"
@@ -938,6 +944,143 @@ async def cmd_git(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Ошибка: {e}")
 
 
+# --- Scan windows ---
+
+async def cmd_scan(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Show scan window settings with buttons."""
+    if not is_admin(update.effective_user.id):
+        return
+    windows = get_scan_windows()
+    period = get_scan_period_min()
+    if windows:
+        win_str = ", ".join(f"{s}-{e}" for s, e in windows)
+    else:
+        win_str = "не заданы"
+    await update.message.reply_text(
+        f"📡 Скан аккаунтов\n\n"
+        f"Окна (МСК): {win_str}\n"
+        f"Период: {period} мин + рандом 1-30 сек\n"
+        f"Твитов: 19-27 (рандом)\n\n"
+        f"Во время окна бот проходит по всем аккаунтам поочерёдно, "
+        f"один раз за окно.",
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🕐 Окна", callback_data="scan:set_windows"),
+                InlineKeyboardButton("⏱ Период", callback_data="scan:set_period"),
+            ],
+        ]),
+    )
+
+
+async def callback_scan_set_windows(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text(
+        "🕐 Введи окна скана (МСК):\n\n"
+        "Формат: 12:00-17:00,21:00-02:00\n"
+        "Или одно окно: 12:00-17:00\n\n"
+        "Отключить: 0\n"
+        "/cancel для отмены",
+    )
+    return WAITING_SCAN_WINDOWS
+
+
+async def receive_scan_windows(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        return ConversationHandler.END
+    text = (update.message.text or "").strip()
+    if text.startswith("/"):
+        return await _cancel(update, ctx)
+    if text == "0":
+        set_scan_windows("")
+        await update.message.reply_text("✅ Окна скана отключены")
+        return ConversationHandler.END
+    # Validate format
+    import re
+    parts = [p.strip() for p in text.split(",") if p.strip()]
+    for part in parts:
+        if not re.match(r"^\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}$", part):
+            await update.message.reply_text(
+                f"❌ Неверный формат: {part}\n"
+                f"Пример: 12:00-17:00,21:00-02:00"
+            )
+            return WAITING_SCAN_WINDOWS
+    # Normalize
+    normalized = ",".join(parts)
+    set_scan_windows(normalized)
+    await update.message.reply_text(f"✅ Окна скана (МСК): {normalized}")
+    return ConversationHandler.END
+
+
+async def callback_scan_set_period(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    current = get_scan_period_min()
+    buttons = []
+    row = []
+    for m in [5, 6, 7, 8, 9]:
+        label = f"{'✅ ' if m == current else ''}{m} мин"
+        row.append(InlineKeyboardButton(label, callback_data=f"scanperiod:{m}"))
+    buttons.append(row)
+    buttons.append([InlineKeyboardButton("⬅️ Назад", callback_data="scan:back")])
+    await query.edit_message_text(
+        f"⏱ Период между аккаунтами\n\n"
+        f"Сейчас: {current} мин + рандом 1-30 сек\n"
+        f"Выбери новый:",
+        reply_markup=InlineKeyboardMarkup(buttons),
+    )
+
+
+async def callback_scan_period_pick(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    minutes = int(query.data.split(":")[1])
+    set_scan_period_min(minutes)
+    await query.answer(f"Период: {minutes} мин")
+    # Refresh the period menu
+    await callback_scan_set_period(update, ctx)
+
+
+async def callback_scan_back(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Return to scan main menu."""
+    query = update.callback_query
+    await query.answer()
+    windows = get_scan_windows()
+    period = get_scan_period_min()
+    if windows:
+        win_str = ", ".join(f"{s}-{e}" for s, e in windows)
+    else:
+        win_str = "не заданы"
+    await query.edit_message_text(
+        f"📡 Скан аккаунтов\n\n"
+        f"Окна (МСК): {win_str}\n"
+        f"Период: {period} мин + рандом 1-30 сек\n"
+        f"Твитов: 19-27 (рандом)",
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🕐 Окна", callback_data="scan:set_windows"),
+                InlineKeyboardButton("⏱ Период", callback_data="scan:set_period"),
+            ],
+        ]),
+    )
+
+
+async def cmd_scan_now(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Trigger a manual timeline scan."""
+    if not is_admin(update.effective_user.id):
+        return
+    from monitor import request_manual_scan
+    request_manual_scan()
+    accounts = db.list_accounts()
+    period = get_scan_period_min()
+    est_min = len(accounts) * period
+    await update.message.reply_text(
+        f"🚀 Ручной скан запущен!\n\n"
+        f"Аккаунтов: {len(accounts)}\n"
+        f"Примерное время: ~{est_min} мин\n"
+        f"Период: {period} мин + рандом 1-30 сек",
+    )
+
+
 async def send_tweet_to_chat(app: Application, chat_id: str | int, username: str,
                               tweet_url: str, ai_text: str):
     keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Открыть в X", url=tweet_url)]])
@@ -981,9 +1124,20 @@ def setup_handlers(app: Application):
         per_message=False,
     )
 
+    scan_windows_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(callback_scan_set_windows, pattern=r"^scan:set_windows$")],
+        states={WAITING_SCAN_WINDOWS: [
+            CommandHandler("cancel", cancel_input),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, receive_scan_windows),
+        ]},
+        fallbacks=[CommandHandler("cancel", cancel_input)],
+        per_message=False,
+    )
+
     app.add_handler(cookie_conv)
     app.add_handler(tag_conv)
     app.add_handler(excl_conv)
+    app.add_handler(scan_windows_conv)
 
     for cmd, fn in [
         ("start", cmd_start), ("help", cmd_start), ("add", cmd_add),
@@ -991,6 +1145,7 @@ def setup_handlers(app: Application):
         ("key", cmd_key), ("models", cmd_models), ("listid", cmd_listid),
         ("status", cmd_status), ("stats", cmd_stats),
         ("time", cmd_time), ("sleep", cmd_sleep),
+        ("scan", cmd_scan), ("scan_now", cmd_scan_now),
         ("sync", cmd_sync), ("git", cmd_git), ("gitkey", cmd_gitkey),
     ]:
         app.add_handler(CommandHandler(cmd, fn))
@@ -1000,5 +1155,8 @@ def setup_handlers(app: Application):
     app.add_handler(CallbackQueryHandler(callback_deltag, pattern=r"^deltag:"))
     app.add_handler(CallbackQueryHandler(callback_delexcl, pattern=r"^delexcl:"))
     app.add_handler(CallbackQueryHandler(callback_syncskip, pattern=r"^syncskip:"))
+    app.add_handler(CallbackQueryHandler(callback_scan_set_period, pattern=r"^scan:set_period$"))
+    app.add_handler(CallbackQueryHandler(callback_scan_period_pick, pattern=r"^scanperiod:"))
+    app.add_handler(CallbackQueryHandler(callback_scan_back, pattern=r"^scan:back$"))
     app.add_handler(CallbackQueryHandler(callback_back, pattern=r"^back:"))
     app.add_handler(CallbackQueryHandler(callback_noop, pattern=r"^noop:"))

@@ -7,7 +7,7 @@ from telegram.ext import Application, ContextTypes
 from config import TG_BOT_TOKEN
 import database as db
 from bot import setup_handlers
-from monitor import monitor_loop
+from monitor import monitor_loop, timeline_scan_loop
 
 # Logging
 logging.basicConfig(
@@ -32,7 +32,8 @@ async def post_init(app: Application):
     db.deduplicate_accounts()
     db.cleanup_old(days=7)
     asyncio.create_task(monitor_loop(app))
-    logger.info("Bot started, monitor loop launched")
+    asyncio.create_task(timeline_scan_loop(app))
+    logger.info("Bot started, monitor + timeline scan loops launched")
 
 
 def main():

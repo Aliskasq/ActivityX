@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 BEARER = "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
 LIST_GQL_HASH = "HjsWc-nwwHKYwHenbHm-tw"
 MEMBERS_GQL_HASH = "oZLcyjKOfXBf2Jln31YXPw"
+USER_TWEETS_GQL_HASH = "oRJs8SLCRNRbQzuZG93_oA"
+USER_BY_SCREEN_NAME_GQL_HASH = "-oaLodhGbbnzJBACb1kk2Q"
 
 GQL_FEATURES = {
     "rweb_tipjar_consumption_enabled": True,
@@ -192,55 +194,71 @@ def _build_headers(cookies: dict) -> dict:
     }
 
 
-def _parse_tweets(data: dict) -> list[Tweet]:
-    """Extract tweets from GraphQL response."""
+def _parse_tweet_entries(instructions: list) -> list[Tweet]:
+    """Parse tweet entries from GraphQL instructions (shared by list and user timeline)."""
     tweets = []
+    for instruction in instructions:
+        entries = instruction.get("entries", [])
+        for entry in entries:
+            content = entry.get("content", {})
+            if content.get("__typename") != "TimelineTimelineItem":
+                continue
+            result = content.get("itemContent", {}).get("tweet_results", {}).get("result", {})
+            if not result:
+                continue
+            # Handle tweet with tombstone or limited visibility
+            if result.get("__typename") == "TweetWithVisibilityResults":
+                result = result.get("tweet", result)
+            legacy = result.get("legacy", {})
+            core = result.get("core", {}).get("user_results", {}).get("result", {})
+            user_legacy = core.get("legacy", {})
+            username = user_legacy.get("screen_name", "unknown").lower()
+            tweet_id = legacy.get("id_str", "")
+            # Prefer note_tweet (full text for long tweets 280+)
+            note = result.get("note_tweet", {}).get("note_tweet_results", {}).get("result", {})
+            text = note.get("text", "") or legacy.get("full_text", "")
+            created_at = legacy.get("created_at", "")
+            # Extract images
+            images = []
+            media_list = legacy.get("entities", {}).get("media", [])
+            if not media_list:
+                media_list = legacy.get("extended_entities", {}).get("media", [])
+            for media in media_list:
+                if media.get("type") == "photo":
+                    img_url = media.get("media_url_https", "")
+                    if img_url:
+                        images.append(img_url)
+
+            if tweet_id:
+                tweets.append(Tweet(
+                    tweet_id=tweet_id,
+                    username=username,
+                    text=text,
+                    url=f"https://x.com/{username}/status/{tweet_id}",
+                    timestamp=created_at,
+                    images=images,
+                ))
+    return tweets
+
+
+def _parse_tweets(data: dict) -> list[Tweet]:
+    """Extract tweets from list GraphQL response."""
     try:
         instructions = data["data"]["list"]["tweets_timeline"]["timeline"]["instructions"]
-        for instruction in instructions:
-            entries = instruction.get("entries", [])
-            for entry in entries:
-                content = entry.get("content", {})
-                if content.get("__typename") != "TimelineTimelineItem":
-                    continue
-                result = content.get("itemContent", {}).get("tweet_results", {}).get("result", {})
-                if not result:
-                    continue
-                # Handle tweet with tombstone or limited visibility
-                if result.get("__typename") == "TweetWithVisibilityResults":
-                    result = result.get("tweet", result)
-                legacy = result.get("legacy", {})
-                core = result.get("core", {}).get("user_results", {}).get("result", {})
-                user_legacy = core.get("legacy", {})
-                username = user_legacy.get("screen_name", "unknown").lower()
-                tweet_id = legacy.get("id_str", "")
-                # Prefer note_tweet (full text for long tweets 280+)
-                note = result.get("note_tweet", {}).get("note_tweet_results", {}).get("result", {})
-                text = note.get("text", "") or legacy.get("full_text", "")
-                created_at = legacy.get("created_at", "")
-                # Extract images
-                images = []
-                media_list = legacy.get("entities", {}).get("media", [])
-                if not media_list:
-                    media_list = legacy.get("extended_entities", {}).get("media", [])
-                for media in media_list:
-                    if media.get("type") == "photo":
-                        img_url = media.get("media_url_https", "")
-                        if img_url:
-                            images.append(img_url)
-
-                if tweet_id:
-                    tweets.append(Tweet(
-                        tweet_id=tweet_id,
-                        username=username,
-                        text=text,
-                        url=f"https://x.com/{username}/status/{tweet_id}",
-                        timestamp=created_at,
-                        images=images,
-                    ))
+        return _parse_tweet_entries(instructions)
     except (KeyError, TypeError) as e:
-        logger.error(f"Error parsing tweets: {e}")
-    return tweets
+        logger.error(f"Error parsing list tweets: {e}")
+        return []
+
+
+def _parse_user_tweets(data: dict) -> list[Tweet]:
+    """Extract tweets from user timeline GraphQL response."""
+    try:
+        instructions = data["data"]["user"]["result"]["timeline_v2"]["timeline"]["instructions"]
+        return _parse_tweet_entries(instructions)
+    except (KeyError, TypeError) as e:
+        logger.error(f"Error parsing user tweets: {e}")
+        return []
 
 
 async def fetch_list_tweets(list_id: str | None = None) -> list[Tweet]:
@@ -332,6 +350,11 @@ async def fetch_list_members(list_id: str | None = None) -> set[str]:
                     screen_name = _find_screen_name(result)
                     if screen_name:
                         members.add(screen_name.lower())
+                        # Cache user rest_id for timeline fetching
+                        rest_id = result.get("rest_id")
+                        if rest_id:
+                            import database as db_mod
+                            db_mod.set_cached_user_id(screen_name.lower(), rest_id)
         except (KeyError, TypeError) as e:
             logger.error(f"Error parsing list members: {e}")
 
@@ -343,9 +366,90 @@ async def fetch_list_members(list_id: str | None = None) -> set[str]:
         return set()
 
 
-async def fetch_user_tweets(username: str) -> list[Tweet]:
-    """Fetch latest tweets from a specific user (fallback, not used with lists)."""
-    return []
+async def _resolve_user_id(screen_name: str, cookies: dict, headers: dict) -> str | None:
+    """Resolve screen_name to Twitter rest_id via GraphQL."""
+    import database as db_mod
+    # Check cache first
+    cached = db_mod.get_cached_user_id(screen_name)
+    if cached:
+        return cached
+
+    variables = json.dumps({"screen_name": screen_name, "withSafetyModeUserFields": True})
+    features = json.dumps(MEMBERS_FEATURES)
+    url = f"https://x.com/i/api/graphql/{USER_BY_SCREEN_NAME_GQL_HASH}/UserByScreenName"
+
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                url,
+                headers=headers,
+                params={"variables": variables, "features": features},
+                timeout=20,
+                follow_redirects=True,
+            )
+        if r.status_code != 200:
+            logger.error(f"UserByScreenName error {r.status_code} for @{screen_name}")
+            return None
+        data = r.json()
+        rest_id = data.get("data", {}).get("user", {}).get("result", {}).get("rest_id")
+        if rest_id:
+            db_mod.set_cached_user_id(screen_name, rest_id)
+            logger.info(f"Resolved @{screen_name} → {rest_id}")
+        return rest_id
+    except Exception as e:
+        logger.error(f"Error resolving user id for @{screen_name}: {e}")
+        return None
+
+
+async def fetch_user_tweets(username: str, count: int = 20) -> list[Tweet]:
+    """Fetch latest tweets from a specific user's timeline via GraphQL."""
+    cookies = _load_cookies()
+    if not cookies:
+        return []
+
+    headers = _build_headers(cookies)
+    username = username.strip().lstrip("@").lower()
+
+    # Resolve user_id
+    user_id = await _resolve_user_id(username, cookies, headers)
+    if not user_id:
+        logger.error(f"Cannot fetch timeline for @{username}: no user_id")
+        return []
+
+    variables = json.dumps({
+        "userId": user_id,
+        "count": count,
+        "includePromotedContent": True,
+        "withQuickPromoteEligibilityTweetFields": True,
+        "withVoice": True,
+        "withV2Timeline": True,
+    })
+    features = json.dumps(GQL_FEATURES)
+    url = f"https://x.com/i/api/graphql/{USER_TWEETS_GQL_HASH}/UserTweets"
+
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                url,
+                headers=headers,
+                params={"variables": variables, "features": features},
+                timeout=20,
+                follow_redirects=True,
+            )
+        if r.status_code != 200:
+            logger.error(f"UserTweets error {r.status_code} for @{username}: {r.text[:200]}")
+            if r.status_code in (401, 403):
+                reset_client()
+            return []
+
+        data = r.json()
+        tweets = _parse_user_tweets(data)
+        logger.info(f"Got {len(tweets)} tweets from @{username} timeline")
+        return tweets
+
+    except Exception as e:
+        logger.error(f"Error fetching user tweets for @{username}: {e}", exc_info=True)
+        return []
 
 
 def _word_in_text(word: str, text: str) -> bool:

@@ -53,6 +53,11 @@ def init_db():
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS user_ids (
+            username TEXT PRIMARY KEY,
+            rest_id TEXT NOT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
     """)
     conn.commit()
 
@@ -261,6 +266,27 @@ def set_setting(key: str, value: str):
     conn.execute(
         "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
         (key, value),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_cached_user_id(username: str) -> str | None:
+    """Get cached Twitter rest_id for a username."""
+    username = username.strip().lstrip("@").lower()
+    conn = get_db()
+    row = conn.execute("SELECT rest_id FROM user_ids WHERE username = ?", (username,)).fetchone()
+    conn.close()
+    return row["rest_id"] if row else None
+
+
+def set_cached_user_id(username: str, rest_id: str):
+    """Cache Twitter rest_id for a username."""
+    username = username.strip().lstrip("@").lower()
+    conn = get_db()
+    conn.execute(
+        "INSERT OR REPLACE INTO user_ids (username, rest_id) VALUES (?, ?)",
+        (username, rest_id),
     )
     conn.commit()
     conn.close()

@@ -1,14 +1,19 @@
 """Main monitoring loop — fetches Twitter list on schedule or interval."""
 import asyncio
 import logging
+import random
 from datetime import datetime, timedelta, timezone
 from telegram.ext import Application
 
 import database as db
-from scraper import fetch_list_tweets, fetch_list_members, matches_keywords
+from scraper import fetch_list_tweets, fetch_list_members, fetch_user_tweets, matches_keywords
 from ai_processor import process_tweet
 from bot import send_tweet_to_chat
-from config import TG_CHAT_ID, TWITTER_LIST_ID, get_schedule_mode, get_schedule_times, get_interval_min, get_sleep_window
+from config import (
+    TG_CHAT_ID, TWITTER_LIST_ID,
+    get_schedule_mode, get_schedule_times, get_interval_min, get_sleep_window,
+    get_scan_windows, get_scan_period_min,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +26,15 @@ _last_cleanup_date: str | None = None
 _last_error_notified: str | None = None
 # Track manual-not-in-list notifications (only send once per user)
 _notified_manual_missing: set[str] = set()
+
+# Timeline scan state
+_timeline_scan_requested: bool = False  # Manual scan trigger
+
+
+def request_manual_scan():
+    """Trigger a manual timeline scan (called from bot /scan_now)."""
+    global _timeline_scan_requested
+    _timeline_scan_requested = True
 
 
 def _is_sleeping() -> bool:
@@ -303,3 +317,182 @@ async def monitor_loop(app: Application):
         wait = _seconds_until_next_run()
         logger.info(f"Next check in {wait/60:.1f} min")
         await asyncio.sleep(wait)
+
+
+async def _process_account_tweets(app: Application, username: str, tweets: list) -> int:
+    """Process tweets from a single account timeline. Returns number of matches."""
+    if not tweets:
+        return 0
+
+    monitored = set(db.list_accounts())
+    acct_keywords = db.list_account_keywords(username)
+    acct_exclusions = db.list_account_exclusions(username)
+    matched = []
+
+    for tweet in tweets:
+        if db.is_seen(tweet.tweet_id):
+            continue
+
+        if tweet.username not in monitored:
+            db.mark_seen(tweet.tweet_id, tweet.username, tweet.text)
+            continue
+
+        is_match = matches_keywords(tweet, acct_keywords, acct_exclusions)
+        logger.info(
+            f"[timeline] @{tweet.username}/{tweet.tweet_id} match={is_match} "
+            f"kw={acct_keywords} excl={acct_exclusions} "
+            f"text={tweet.text[:100]!r}"
+        )
+
+        db.mark_seen(tweet.tweet_id, tweet.username, tweet.text)
+        if is_match:
+            logger.info(f"✅ Timeline match! @{tweet.username}: {tweet.tweet_id}")
+            matched.append(tweet)
+
+    for tweet in matched:
+        try:
+            ai_result = await process_tweet(tweet.text, tweet.username)
+            if TG_CHAT_ID:
+                await send_tweet_to_chat(app, TG_CHAT_ID, tweet.username, tweet.url, ai_result)
+            await asyncio.sleep(30)
+        except Exception as e:
+            logger.error(f"Error processing timeline tweet @{tweet.username}/{tweet.tweet_id}: {e}")
+
+    return len(matched)
+
+
+def _in_time_window(now_msk: datetime, start_str: str, end_str: str) -> bool:
+    """Check if current MSK time is within a window (handles overnight)."""
+    current = now_msk.hour * 60 + now_msk.minute
+    sh, sm = map(int, start_str.split(":"))
+    eh, em = map(int, end_str.split(":"))
+    start = sh * 60 + sm
+    end = eh * 60 + em
+    if start <= end:
+        return start <= current < end
+    else:
+        return current >= start or current < end
+
+
+def _window_key(start: str, end: str) -> str:
+    return f"{start}-{end}"
+
+
+async def _run_timeline_scan(app: Application, label: str = "window"):
+    """Run one full pass through all accounts' timelines with delays."""
+    accounts = db.list_accounts()
+    if not accounts:
+        return
+    period_min = get_scan_period_min()
+    total_matched = 0
+
+    logger.info(f"📡 Timeline scan started ({label}): {len(accounts)} accounts, period={period_min}min")
+    if TG_CHAT_ID:
+        try:
+            await app.bot.send_message(
+                chat_id=TG_CHAT_ID,
+                text=f"📡 Скан аккаунтов начался ({label}): {len(accounts)} акков",
+            )
+        except Exception:
+            pass
+
+    for i, username in enumerate(accounts):
+        try:
+            count = random.randint(19, 27)
+            tweets = await fetch_user_tweets(username, count=count)
+            matches = await _process_account_tweets(app, username, tweets)
+            total_matched += matches
+            logger.info(
+                f"[timeline] @{username}: {len(tweets)} fetched, {matches} matched "
+                f"({i+1}/{len(accounts)})"
+            )
+        except Exception as e:
+            logger.error(f"[timeline] Error scanning @{username}: {e}", exc_info=True)
+
+        # Delay between accounts (except after last one)
+        if i < len(accounts) - 1:
+            delay = period_min * 60 + random.randint(1, 30)
+            logger.info(f"[timeline] Next account in {delay}s")
+            await asyncio.sleep(delay)
+
+    logger.info(f"📡 Timeline scan finished ({label}): {total_matched} total matches")
+    if TG_CHAT_ID:
+        try:
+            await app.bot.send_message(
+                chat_id=TG_CHAT_ID,
+                text=f"✅ Скан аккаунтов завершён ({label}): {total_matched} совпадений",
+            )
+        except Exception:
+            pass
+
+
+async def timeline_scan_loop(app: Application):
+    """Background loop: scan individual account timelines during configured windows."""
+    global _timeline_scan_requested
+
+    logger.info("Timeline scan loop started")
+    # Track which windows were completed today
+    completed_today: dict[str, str] = {}  # window_key -> date
+
+    while True:
+        try:
+            # Check for manual scan request
+            if _timeline_scan_requested:
+                _timeline_scan_requested = False
+                logger.info("Manual timeline scan triggered")
+                await _run_timeline_scan(app, label="ручной")
+                continue
+
+            # Check scan windows
+            windows = get_scan_windows()
+            if not windows:
+                await asyncio.sleep(60)
+                continue
+
+            now_msk = datetime.now(MSK)
+            today = now_msk.strftime("%Y-%m-%d")
+
+            # Clean completed_today on date change
+            completed_today = {k: v for k, v in completed_today.items() if v == today}
+
+            active_window = None
+            for start, end in windows:
+                wk = _window_key(start, end)
+                if _in_time_window(now_msk, start, end) and completed_today.get(wk) != today:
+                    active_window = (start, end)
+                    break
+
+            if not active_window:
+                await asyncio.sleep(60)
+                continue
+
+            wk = _window_key(active_window[0], active_window[1])
+
+            # Random start delay within the first hour of the window
+            wh, wm = map(int, active_window[0].split(":"))
+            window_start_min = wh * 60 + wm
+            current_min = now_msk.hour * 60 + now_msk.minute
+            # How many minutes since window started
+            elapsed = current_min - window_start_min
+            if elapsed < 0:
+                elapsed += 24 * 60  # overnight window
+
+            if elapsed < 60:
+                # We're in the first hour — pick random delay within remaining time
+                remaining = max(0, 60 - elapsed)
+                if remaining > 1:
+                    delay_min = random.randint(0, remaining - 1)
+                    logger.info(f"[timeline] Window {wk} active, random start in {delay_min} min")
+                    await asyncio.sleep(delay_min * 60 + random.randint(0, 59))
+                    # Re-check that we're still in the window
+                    now_msk = datetime.now(MSK)
+                    if not _in_time_window(now_msk, active_window[0], active_window[1]):
+                        continue
+
+            # Run the scan
+            await _run_timeline_scan(app, label=f"окно {wk}")
+            completed_today[wk] = today
+
+        except Exception as e:
+            logger.error(f"Timeline scan loop error: {e}", exc_info=True)
+            await asyncio.sleep(300)
