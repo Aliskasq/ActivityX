@@ -968,7 +968,18 @@ async def cmd_scan(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 InlineKeyboardButton("🕐 Окна", callback_data="scan:set_windows"),
                 InlineKeyboardButton("⏱ Период", callback_data="scan:set_period"),
             ],
+            [InlineKeyboardButton("🔴 Отключить скан", callback_data="scan:disable")],
         ]),
+    )
+
+
+async def callback_scan_disable(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer("Скан отключён")
+    set_scan_windows("")
+    await query.edit_message_text(
+        "🔴 Скан аккаунтов отключён.\n\n"
+        "Включить: /scan → 🕐 Окна",
     )
 
 
@@ -1060,6 +1071,7 @@ async def callback_scan_back(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 InlineKeyboardButton("🕐 Окна", callback_data="scan:set_windows"),
                 InlineKeyboardButton("⏱ Период", callback_data="scan:set_period"),
             ],
+            [InlineKeyboardButton("🔴 Отключить скан", callback_data="scan:disable")],
         ]),
     )
 
@@ -1155,6 +1167,7 @@ def setup_handlers(app: Application):
     app.add_handler(CallbackQueryHandler(callback_deltag, pattern=r"^deltag:"))
     app.add_handler(CallbackQueryHandler(callback_delexcl, pattern=r"^delexcl:"))
     app.add_handler(CallbackQueryHandler(callback_syncskip, pattern=r"^syncskip:"))
+    app.add_handler(CallbackQueryHandler(callback_scan_disable, pattern=r"^scan:disable$"))
     app.add_handler(CallbackQueryHandler(callback_scan_set_period, pattern=r"^scan:set_period$"))
     app.add_handler(CallbackQueryHandler(callback_scan_period_pick, pattern=r"^scanperiod:"))
     app.add_handler(CallbackQueryHandler(callback_scan_back, pattern=r"^scan:back$"))
