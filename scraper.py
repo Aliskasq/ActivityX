@@ -199,10 +199,19 @@ def _parse_tweet_entries(instructions: list) -> list[Tweet]:
     tweets = []
     for instruction in instructions:
         entries = instruction.get("entries", [])
+        # Flatten: include module sub-items (profile-conversation threads)
+        flat_items = []
         for entry in entries:
             content = entry.get("content", {})
-            if content.get("__typename") != "TimelineTimelineItem":
-                continue
+            typename = content.get("__typename", "")
+            if typename == "TimelineTimelineItem":
+                flat_items.append(content)
+            elif typename == "TimelineTimelineModule":
+                for sub in content.get("items", []):
+                    sub_item = sub.get("item", {})
+                    if sub_item:
+                        flat_items.append(sub_item)
+        for content in flat_items:
             result = content.get("itemContent", {}).get("tweet_results", {}).get("result", {})
             if not result:
                 continue
