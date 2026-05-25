@@ -254,7 +254,9 @@ def _parse_tweets(data: dict) -> list[Tweet]:
 def _parse_user_tweets(data: dict) -> list[Tweet]:
     """Extract tweets from user timeline GraphQL response."""
     try:
-        instructions = data["data"]["user"]["result"]["timeline_v2"]["timeline"]["instructions"]
+        user_result = data["data"]["user"]["result"]
+        timeline = user_result.get("timeline_v2") or user_result.get("timeline")
+        instructions = timeline["timeline"]["instructions"]
         return _parse_tweet_entries(instructions)
     except (KeyError, TypeError) as e:
         logger.error(f"Error parsing user tweets: {e}")
