@@ -1,4 +1,5 @@
 """Fetch tweets from Twitter using direct GraphQL API (cookie-based auth)."""
+import asyncio
 import json
 import logging
 import os
@@ -412,8 +413,36 @@ async def _resolve_user_id(screen_name: str, cookies: dict, headers: dict) -> st
         return None
 
 
+def _extract_bottom_cursor(data: dict, mode: str = "user") -> str | None:
+    """Extract the bottom cursor from a GraphQL timeline response for pagination."""
+    try:
+        if mode == "user":
+            user_result = data["data"]["user"]["result"]
+            timeline = user_result.get("timeline_v2") or user_result.get("timeline")
+            instructions = timeline["timeline"]["instructions"]
+        else:
+            instructions = data["data"]["list"]["tweets_timeline"]["timeline"]["instructions"]
+
+        for instruction in instructions:
+            entries = instruction.get("entries", [])
+            for entry in entries:
+                content = entry.get("content", {})
+                if content.get("__typename") == "TimelineTimelineCursor" and \
+                   content.get("cursorType") == "Bottom":
+                    return content.get("value")
+                # Also check entryType pattern
+                if entry.get("entryId", "").startswith("cursor-bottom"):
+                    return content.get("value")
+    except (KeyError, TypeError):
+        pass
+    return None
+
+
 async def fetch_user_tweets(username: str, count: int = 20) -> list[Tweet]:
-    """Fetch latest tweets from a specific user's timeline via GraphQL."""
+    """Fetch latest tweets from a specific user's timeline via GraphQL.
+
+    Uses cursor-based pagination to fetch up to `count` tweets.
+    """
     cookies = _load_cookies()
     if not cookies:
         return []
@@ -427,40 +456,74 @@ async def fetch_user_tweets(username: str, count: int = 20) -> list[Tweet]:
         logger.error(f"Cannot fetch timeline for @{username}: no user_id")
         return []
 
-    variables = json.dumps({
-        "userId": user_id,
-        "count": count,
-        "includePromotedContent": True,
-        "withQuickPromoteEligibilityTweetFields": True,
-        "withVoice": True,
-        "withV2Timeline": True,
-    })
     features = json.dumps(GQL_FEATURES)
     url = f"https://x.com/i/api/graphql/{USER_TWEETS_GQL_HASH}/UserTweets"
+    all_tweets: list[Tweet] = []
+    seen_ids: set[str] = set()
+    cursor: str | None = None
+    max_pages = 5  # Safety limit
 
-    try:
-        async with httpx.AsyncClient() as client:
-            r = await client.get(
-                url,
-                headers=headers,
-                params={"variables": variables, "features": features},
-                timeout=20,
-                follow_redirects=True,
+    for page in range(max_pages):
+        vars_dict = {
+            "userId": user_id,
+            "count": min(count, 40),  # Twitter typically caps per-page at ~40
+            "includePromotedContent": True,
+            "withQuickPromoteEligibilityTweetFields": True,
+            "withVoice": True,
+            "withV2Timeline": True,
+        }
+        if cursor:
+            vars_dict["cursor"] = cursor
+
+        try:
+            async with httpx.AsyncClient() as client:
+                r = await client.get(
+                    url,
+                    headers=headers,
+                    params={"variables": json.dumps(vars_dict), "features": features},
+                    timeout=20,
+                    follow_redirects=True,
+                )
+            if r.status_code != 200:
+                logger.error(f"UserTweets error {r.status_code} for @{username}: {r.text[:200]}")
+                if r.status_code in (401, 403):
+                    reset_client()
+                break
+
+            data = r.json()
+            tweets = _parse_user_tweets(data)
+
+            # Deduplicate
+            new_count = 0
+            for t in tweets:
+                if t.tweet_id not in seen_ids:
+                    seen_ids.add(t.tweet_id)
+                    all_tweets.append(t)
+                    new_count += 1
+
+            logger.info(
+                f"[page {page+1}] Got {len(tweets)} tweets from @{username} "
+                f"(+{new_count} new, total {len(all_tweets)})"
             )
-        if r.status_code != 200:
-            logger.error(f"UserTweets error {r.status_code} for @{username}: {r.text[:200]}")
-            if r.status_code in (401, 403):
-                reset_client()
-            return []
 
-        data = r.json()
-        tweets = _parse_user_tweets(data)
-        logger.info(f"Got {len(tweets)} tweets from @{username} timeline")
-        return tweets
+            # Enough tweets or no new results
+            if len(all_tweets) >= count or new_count == 0:
+                break
 
-    except Exception as e:
-        logger.error(f"Error fetching user tweets for @{username}: {e}", exc_info=True)
-        return []
+            # Get next page cursor
+            cursor = _extract_bottom_cursor(data, mode="user")
+            if not cursor:
+                break
+
+            # Small delay between pages
+            await asyncio.sleep(1)
+
+        except Exception as e:
+            logger.error(f"Error fetching user tweets for @{username}: {e}", exc_info=True)
+            break
+
+    logger.info(f"Got {len(all_tweets)} tweets from @{username} timeline")
+    return all_tweets[:count]
 
 
 def _word_in_text(word: str, text: str) -> bool:
