@@ -29,12 +29,19 @@ _notified_manual_missing: set[str] = set()
 
 # Timeline scan state
 _timeline_scan_requested: bool = False  # Manual scan trigger
+_single_account_scan: dict | None = None  # {"username": ..., "count": ..., "chat_id": ...}
 
 
 def request_manual_scan():
     """Trigger a manual timeline scan (called from bot /scan_now)."""
     global _timeline_scan_requested
     _timeline_scan_requested = True
+
+
+def request_single_account_scan(username: str, count: int, chat_id: int):
+    """Trigger a scan of a single account (called from bot)."""
+    global _single_account_scan
+    _single_account_scan = {"username": username, "count": count, "chat_id": chat_id}
 
 
 def _is_sleeping() -> bool:
@@ -378,6 +385,43 @@ def _window_key(start: str, end: str) -> str:
     return f"{start}-{end}"
 
 
+async def _run_single_account_scan(app: Application, username: str, count: int, chat_id: int):
+    """Scan a single account's timeline with fresh seen state."""
+    logger.info(f"📡 Single account scan: @{username}, count={count}")
+
+    # Clear seen tweets for this account
+    cleared = db.clear_seen_for_user(username)
+    logger.info(f"Cleared {cleared} seen tweets for @{username}")
+
+    try:
+        tweets = await fetch_user_tweets(username, count=count)
+        matches = await _process_account_tweets(app, username, tweets)
+        logger.info(
+            f"[single-scan] @{username}: {len(tweets)} fetched, {matches} matched"
+        )
+
+        # Send result to chat
+        try:
+            text = (
+                f"🔍 Скан @{username} завершён\n\n"
+                f"Получено твитов: {len(tweets)}\n"
+                f"Совпадений: {matches}\n"
+                f"Очищено seen: {cleared}"
+            )
+            await app.bot.send_message(chat_id=chat_id, text=text)
+        except Exception:
+            pass
+
+    except Exception as e:
+        logger.error(f"[single-scan] Error scanning @{username}: {e}", exc_info=True)
+        try:
+            await app.bot.send_message(
+                chat_id=chat_id, text=f"❌ Ошибка скана @{username}: {e}"
+            )
+        except Exception:
+            pass
+
+
 async def _run_timeline_scan(app: Application, label: str = "window"):
     """Run one full pass through all accounts' timelines with delays."""
     accounts = db.list_accounts()
@@ -428,7 +472,7 @@ async def _run_timeline_scan(app: Application, label: str = "window"):
 
 async def timeline_scan_loop(app: Application):
     """Background loop: scan individual account timelines during configured windows."""
-    global _timeline_scan_requested
+    global _timeline_scan_requested, _single_account_scan
 
     logger.info("Timeline scan loop started")
     # Track which windows were completed today
@@ -436,6 +480,15 @@ async def timeline_scan_loop(app: Application):
 
     while True:
         try:
+            # Check for single account scan request
+            if _single_account_scan is not None:
+                req = _single_account_scan
+                _single_account_scan = None
+                await _run_single_account_scan(
+                    app, req["username"], req["count"], req["chat_id"]
+                )
+                continue
+
             # Check for manual scan request
             if _timeline_scan_requested:
                 _timeline_scan_requested = False

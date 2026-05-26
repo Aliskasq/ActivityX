@@ -302,6 +302,18 @@ def clear_seen() -> int:
     return deleted
 
 
+def clear_seen_for_user(username: str) -> int:
+    """Delete seen tweets for a specific user. Returns count deleted."""
+    conn = get_db()
+    cur = conn.execute(
+        "DELETE FROM seen_tweets WHERE LOWER(username) = LOWER(?)", (username,)
+    )
+    deleted = cur.rowcount
+    conn.commit()
+    conn.close()
+    return deleted
+
+
 def deduplicate_accounts():
     """Remove duplicate accounts (case-insensitive)."""
     conn = get_db()
