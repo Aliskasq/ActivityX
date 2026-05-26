@@ -204,6 +204,10 @@ def _parse_tweet_entries(instructions: list, fallback_username: str | None = Non
     tweets = []
     for instruction in instructions:
         entries = instruction.get("entries", [])
+        # Include pinned tweet (singular "entry" key)
+        pinned = instruction.get("entry")
+        if pinned:
+            entries = list(entries) + [pinned]
         # Flatten: include module sub-items (profile-conversation threads)
         flat_items = []
         for entry in entries:
@@ -225,8 +229,13 @@ def _parse_tweet_entries(instructions: list, fallback_username: str | None = Non
                 result = result.get("tweet", result)
             legacy = result.get("legacy", {})
             core = result.get("core", {}).get("user_results", {}).get("result", {})
+            # screen_name can be in legacy OR core (Twitter moved it)
             user_legacy = core.get("legacy", {})
-            username = user_legacy.get("screen_name", "").lower() or (
+            user_core = core.get("core", {})
+            username = (
+                user_legacy.get("screen_name", "")
+                or user_core.get("screen_name", "")
+            ).lower() or (
                 fallback_username.lower() if fallback_username else "unknown"
             )
             tweet_id = legacy.get("id_str", "")
