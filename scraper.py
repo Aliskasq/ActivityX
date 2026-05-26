@@ -195,8 +195,12 @@ def _build_headers(cookies: dict) -> dict:
     }
 
 
-def _parse_tweet_entries(instructions: list) -> list[Tweet]:
-    """Parse tweet entries from GraphQL instructions (shared by list and user timeline)."""
+def _parse_tweet_entries(instructions: list, fallback_username: str | None = None) -> list[Tweet]:
+    """Parse tweet entries from GraphQL instructions (shared by list and user timeline).
+
+    Args:
+        fallback_username: if set, used when screen_name can't be extracted from tweet.
+    """
     tweets = []
     for instruction in instructions:
         entries = instruction.get("entries", [])
@@ -222,7 +226,9 @@ def _parse_tweet_entries(instructions: list) -> list[Tweet]:
             legacy = result.get("legacy", {})
             core = result.get("core", {}).get("user_results", {}).get("result", {})
             user_legacy = core.get("legacy", {})
-            username = user_legacy.get("screen_name", "unknown").lower()
+            username = user_legacy.get("screen_name", "").lower() or (
+                fallback_username.lower() if fallback_username else "unknown"
+            )
             tweet_id = legacy.get("id_str", "")
             # Prefer note_tweet (full text for long tweets 280+)
             note = result.get("note_tweet", {}).get("note_tweet_results", {}).get("result", {})
@@ -261,13 +267,13 @@ def _parse_tweets(data: dict) -> list[Tweet]:
         return []
 
 
-def _parse_user_tweets(data: dict) -> list[Tweet]:
+def _parse_user_tweets(data: dict, fallback_username: str | None = None) -> list[Tweet]:
     """Extract tweets from user timeline GraphQL response."""
     try:
         user_result = data["data"]["user"]["result"]
         timeline = user_result.get("timeline_v2") or user_result.get("timeline")
         instructions = timeline["timeline"]["instructions"]
-        return _parse_tweet_entries(instructions)
+        return _parse_tweet_entries(instructions, fallback_username=fallback_username)
     except (KeyError, TypeError) as e:
         logger.error(f"Error parsing user tweets: {e}")
         return []
@@ -491,7 +497,7 @@ async def fetch_user_tweets(username: str, count: int = 20) -> list[Tweet]:
                 break
 
             data = r.json()
-            tweets = _parse_user_tweets(data)
+            tweets = _parse_user_tweets(data, fallback_username=username)
 
             # Deduplicate
             new_count = 0
