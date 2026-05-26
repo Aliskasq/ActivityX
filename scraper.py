@@ -11,11 +11,21 @@ from config import COOKIES_PATH, TWITTER_LIST_ID
 
 logger = logging.getLogger(__name__)
 
+import re as _re
+
 BEARER = "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
-LIST_GQL_HASH = "HjsWc-nwwHKYwHenbHm-tw"
-MEMBERS_GQL_HASH = "oZLcyjKOfXBf2Jln31YXPw"
-USER_TWEETS_GQL_HASH = "oRJs8SLCRNRbQzuZG93_oA"
-USER_BY_SCREEN_NAME_GQL_HASH = "-oaLodhGbbnzJBACb1kk2Q"
+LIST_GQL_HASH = "EaZggwYxthCW30dKBN807Q"
+MEMBERS_GQL_HASH = "qC0uLn_94QWJSpRZzzaJ-A"
+USER_TWEETS_GQL_HASH = "3AS73VJOTCg8ePuvJndFew"
+USER_BY_SCREEN_NAME_GQL_HASH = "IGgvgiOx4QZndDHuD3x9TQ"
+
+# Operations we track for auto-update
+_GQL_OPERATIONS = {
+    "ListLatestTweetsTimeline": "LIST_GQL_HASH",
+    "ListMembers": "MEMBERS_GQL_HASH",
+    "UserTweets": "USER_TWEETS_GQL_HASH",
+    "UserByScreenName": "USER_BY_SCREEN_NAME_GQL_HASH",
+}
 
 GQL_FEATURES = {
     "rweb_tipjar_consumption_enabled": True,
@@ -183,6 +193,177 @@ def _normalize_cookies(path: str):
         logger.error(f"Cookie normalization failed: {e}")
 
 
+async def fetch_gql_hashes() -> dict[str, str]:
+    """Fetch current GQL hashes from Twitter's JS bundles.
+
+    Returns dict like {"UserTweets": "abc123", "ListLatestTweetsTimeline": "def456", ...}
+    """
+    found: dict[str, str] = {}
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
+            # Step 1: Get main page to find JS bundle URLs
+            r = await client.get("https://x.com", headers={
+                "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            })
+            # Find all JS bundle URLs
+            js_urls = _re.findall(r'https://abs\.twimg\.com/responsive-web/client-web[^"\']+\.js', r.text)
+            if not js_urls:
+                # Try alternative pattern
+                js_urls = _re.findall(r'https://abs\.twimg\.com/responsive-web/[^"\']+\.js', r.text)
+            logger.info(f"[fix_hashes] Found {len(js_urls)} JS bundles")
+
+            # Step 2: Search each bundle for operation hashes
+            operations = set(_GQL_OPERATIONS.keys())
+            for js_url in js_urls:
+                if len(found) == len(operations):
+                    break
+                try:
+                    jr = await client.get(js_url, headers={
+                        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    })
+                    js_text = jr.text
+
+                    # Pattern: queryId:"hash",operationName:"OpName"
+                    # or operationName:"OpName",... queryId:"hash"
+                    for op in operations - set(found.keys()):
+                        # Try pattern 1: queryId before operationName
+                        m = _re.search(
+                            r'queryId\s*:\s*"([A-Za-z0-9_-]+)"[^}]{0,100}operationName\s*:\s*"'
+                            + _re.escape(op) + r'"',
+                            js_text,
+                        )
+                        if not m:
+                            # Try pattern 2: operationName before queryId
+                            m = _re.search(
+                                r'operationName\s*:\s*"' + _re.escape(op)
+                                + r'"[^}]{0,100}queryId\s*:\s*"([A-Za-z0-9_-]+)"',
+                                js_text,
+                            )
+                        if m:
+                            found[op] = m.group(1)
+                            logger.info(f"[fix_hashes] {op} -> {m.group(1)}")
+                except Exception as e:
+                    logger.debug(f"[fix_hashes] Error reading {js_url}: {e}")
+                    continue
+
+    except Exception as e:
+        logger.error(f"[fix_hashes] Error fetching JS bundles: {e}", exc_info=True)
+
+    return found
+
+
+async def auto_fix_hashes() -> dict:
+    """Fetch new GQL hashes, validate them, and update in-memory + scraper.py.
+
+    Returns {"updated": [...], "failed": [...], "unchanged": [...]}
+    """
+    global LIST_GQL_HASH, MEMBERS_GQL_HASH, USER_TWEETS_GQL_HASH, USER_BY_SCREEN_NAME_GQL_HASH
+
+    new_hashes = await fetch_gql_hashes()
+    if not new_hashes:
+        return {"updated": [], "failed": ["Не удалось извлечь хеши из JS бандлов"], "unchanged": []}
+
+    current = {
+        "ListLatestTweetsTimeline": LIST_GQL_HASH,
+        "ListMembers": MEMBERS_GQL_HASH,
+        "UserTweets": USER_TWEETS_GQL_HASH,
+        "UserByScreenName": USER_BY_SCREEN_NAME_GQL_HASH,
+    }
+
+    updated = []
+    failed = []
+    unchanged = []
+
+    # Validate each new hash with a test request
+    cookies = _load_cookies()
+    headers = _build_headers(cookies) if cookies else {}
+
+    for op, new_hash in new_hashes.items():
+        old_hash = current.get(op, "")
+        if new_hash == old_hash:
+            unchanged.append(op)
+            continue
+
+        # Test the new hash
+        valid = False
+        if cookies and headers:
+            try:
+                if op == "UserByScreenName":
+                    test_url = f"https://x.com/i/api/graphql/{new_hash}/UserByScreenName"
+                    test_vars = json.dumps({"screen_name": "binance"})
+                    test_features = json.dumps(GQL_FEATURES)
+                elif op == "UserTweets":
+                    test_url = f"https://x.com/i/api/graphql/{new_hash}/UserTweets"
+                    test_vars = json.dumps({"userId": "877807935493033984", "count": 1,
+                                            "includePromotedContent": False, "withV2Timeline": True})
+                    test_features = json.dumps(GQL_FEATURES)
+                elif op == "ListLatestTweetsTimeline":
+                    from config import TWITTER_LIST_ID as _lid
+                    test_url = f"https://x.com/i/api/graphql/{new_hash}/ListLatestTweetsTimeline"
+                    test_vars = json.dumps({"listId": _lid or "0", "count": 1})
+                    test_features = json.dumps(GQL_FEATURES)
+                elif op == "ListMembers":
+                    from config import TWITTER_LIST_ID as _lid
+                    test_url = f"https://x.com/i/api/graphql/{new_hash}/ListMembers"
+                    test_vars = json.dumps({"listId": _lid or "0", "count": 1})
+                    test_features = json.dumps(MEMBERS_FEATURES)
+                else:
+                    valid = True  # Unknown op, trust it
+
+                if not valid:
+                    async with httpx.AsyncClient() as client:
+                        tr = await client.get(
+                            test_url, headers=headers,
+                            params={"variables": test_vars, "features": test_features},
+                            timeout=15, follow_redirects=True,
+                        )
+                    valid = tr.status_code == 200
+                    logger.info(f"[fix_hashes] Test {op}: {new_hash} -> {tr.status_code}")
+            except Exception as e:
+                logger.error(f"[fix_hashes] Test {op} failed: {e}")
+                valid = False
+        else:
+            # No cookies — accept without validation
+            valid = True
+
+        if valid:
+            # Update in-memory
+            if op == "ListLatestTweetsTimeline":
+                LIST_GQL_HASH = new_hash
+            elif op == "ListMembers":
+                MEMBERS_GQL_HASH = new_hash
+            elif op == "UserTweets":
+                USER_TWEETS_GQL_HASH = new_hash
+            elif op == "UserByScreenName":
+                USER_BY_SCREEN_NAME_GQL_HASH = new_hash
+
+            # Update scraper.py file
+            var_name = _GQL_OPERATIONS[op]
+            _update_hash_in_file(var_name, new_hash)
+            updated.append(f"{op}: {old_hash} → {new_hash}")
+        else:
+            failed.append(f"{op}: новый хеш {new_hash} не прошёл проверку")
+
+    return {"updated": updated, "failed": failed, "unchanged": unchanged}
+
+
+def _update_hash_in_file(var_name: str, new_hash: str):
+    """Update a GQL hash variable in scraper.py on disk."""
+    try:
+        filepath = os.path.join(os.path.dirname(__file__), "scraper.py")
+        with open(filepath, "r") as f:
+            content = f.read()
+        # Match: VAR_NAME = "old_hash"
+        pattern = _re.compile(r'(' + _re.escape(var_name) + r'\s*=\s*")[^"]*(")')
+        new_content = pattern.sub(r'\g<1>' + new_hash + r'\2', content, count=1)
+        if new_content != content:
+            with open(filepath, "w") as f:
+                f.write(new_content)
+            logger.info(f"[fix_hashes] Updated {var_name} = {new_hash!r} in scraper.py")
+    except Exception as e:
+        logger.error(f"[fix_hashes] Failed to update {var_name} in file: {e}")
+
+
 def _build_headers(cookies: dict) -> dict:
     return {
         "authorization": BEARER,
@@ -229,13 +410,9 @@ def _parse_tweet_entries(instructions: list, fallback_username: str | None = Non
                 result = result.get("tweet", result)
             legacy = result.get("legacy", {})
             core = result.get("core", {}).get("user_results", {}).get("result", {})
-            # screen_name can be in legacy OR core (Twitter moved it)
-            user_legacy = core.get("legacy", {})
-            user_core = core.get("core", {})
-            username = (
-                user_legacy.get("screen_name", "")
-                or user_core.get("screen_name", "")
-            ).lower() or (
+            # Extract screen_name (handles API structure changes)
+            screen = _find_screen_name(core)
+            username = (screen.lower() if screen else None) or (
                 fallback_username.lower() if fallback_username else "unknown"
             )
             tweet_id = legacy.get("id_str", "")

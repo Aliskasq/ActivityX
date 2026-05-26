@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from telegram.ext import Application
 
 import database as db
-from scraper import fetch_list_tweets, fetch_list_members, fetch_user_tweets, matches_keywords
+from scraper import fetch_list_tweets, fetch_list_members, fetch_user_tweets, matches_keywords, auto_fix_hashes
 from ai_processor import process_tweet
 from bot import send_tweet_to_chat
 from config import (
@@ -300,11 +300,22 @@ async def monitor_loop(app: Application):
                 matched.append(tweet)
                 db.mark_seen(tweet.tweet_id, tweet.username, tweet.text)
 
+            # Count unknown usernames for health alert
+            unknown_count = sum(1 for t in tweets if t.username == "unknown")
             logger.info(
                 f"Scan summary: {len(tweets)} total, {skip_seen} seen, "
                 f"{new_count} new, {skip_unmonitored} unmonitored, "
-                f"{len(matched)} matched"
+                f"{len(matched)} matched, {unknown_count} unknown"
             )
+
+            # Health alerts
+            if unknown_count > len(tweets) * 0.5 and len(tweets) > 0:
+                await _notify_error(
+                    app, "unknown_users",
+                    f"⚠️ Проблема парсинга: {unknown_count}/{len(tweets)} твитов "
+                    f"с username=unknown.\nВозможно Twitter сменил структуру API.\n"
+                    f"Попробуй /fix_hashes"
+                )
             if matched:
                 logger.info(f"Processing {len(matched)} matched tweets through AI...")
             for tweet in matched:
@@ -322,7 +333,16 @@ async def monitor_loop(app: Application):
             await _notify_error(app, "crash", f"🚨 Монитор упал: {e}")
 
         wait = _seconds_until_next_run()
-        logger.info(f"Next check in {wait/60:.1f} min")
+        # Add jitter to avoid bot-like patterns
+        interval_min = wait / 60
+        if interval_min <= 20:
+            jitter = random.uniform(-1.5, 1.5) * 60  # ±1.5 min
+        elif interval_min <= 40:
+            jitter = random.uniform(-3, 3) * 60  # ±3 min
+        else:
+            jitter = random.uniform(-5, 5) * 60  # ±5 min
+        wait = max(60, wait + jitter)  # Minimum 1 min
+        logger.info(f"Next check in {wait/60:.1f} min (jitter applied)")
         await asyncio.sleep(wait)
 
 
@@ -444,12 +464,21 @@ async def _run_timeline_scan(app: Application, label: str = "window"):
         try:
             count = random.randint(19, 27)
             tweets = await fetch_user_tweets(username, count=count)
+            unknown_count = sum(1 for t in tweets if t.username == "unknown")
             matches = await _process_account_tweets(app, username, tweets)
             total_matched += matches
             logger.info(
-                f"[timeline] @{username}: {len(tweets)} fetched, {matches} matched "
-                f"({i+1}/{len(accounts)})"
+                f"[timeline] @{username}: {len(tweets)} fetched, {matches} matched, "
+                f"{unknown_count} unknown ({i+1}/{len(accounts)})"
             )
+            # Alert if too many unknowns in timeline scan
+            if unknown_count > len(tweets) * 0.5 and len(tweets) > 5:
+                await _notify_error(
+                    app, f"unknown_{username}",
+                    f"⚠️ @{username}: {unknown_count}/{len(tweets)} твитов "
+                    f"с username=unknown. Twitter мог сменить API.\n"
+                    f"Попробуй /fix_hashes"
+                )
         except Exception as e:
             logger.error(f"[timeline] Error scanning @{username}: {e}", exc_info=True)
 

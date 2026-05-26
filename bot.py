@@ -60,6 +60,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/scan — окна скана и период\n"
         "/scan_now — запустить скан вручную\n"
         "/scan_one — скан одного аккаунта\n"
+        "/fix_hashes — обновить GQL хеши Twitter\n"
         "/reset_seen — сбросить просмотренные твиты\n\n"
         "Настройки:\n"
         "/cookies — загрузить куки Twitter\n"
@@ -1106,6 +1107,32 @@ async def cmd_scan_now(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def cmd_fix_hashes(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Auto-update GQL hashes from Twitter's JS bundles."""
+    if not is_admin(update.effective_user.id):
+        return
+    await update.message.reply_text("🔧 Ищу актуальные GQL хеши в Twitter JS бандлах...")
+
+    from scraper import auto_fix_hashes
+    result = await auto_fix_hashes()
+
+    lines = []
+    if result["updated"]:
+        lines.append("✅ Обновлено:")
+        for u in result["updated"]:
+            lines.append(f"  {u}")
+    if result["unchanged"]:
+        lines.append(f"🔄 Без изменений: {', '.join(result['unchanged'])}")
+    if result["failed"]:
+        lines.append("❌ Ошибки:")
+        for f in result["failed"]:
+            lines.append(f"  {f}")
+    if not lines:
+        lines.append("❌ Не удалось найти хеши")
+
+    await update.message.reply_text("\n".join(lines))
+
+
 async def cmd_scan_one(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Show account buttons for single-account scan."""
     if not is_admin(update.effective_user.id):
@@ -1246,7 +1273,7 @@ def setup_handlers(app: Application):
         ("status", cmd_status), ("stats", cmd_stats),
         ("time", cmd_time), ("sleep", cmd_sleep),
         ("scan", cmd_scan), ("scan_now", cmd_scan_now), ("scan_one", cmd_scan_one),
-        ("reset_seen", cmd_reset_seen),
+        ("reset_seen", cmd_reset_seen), ("fix_hashes", cmd_fix_hashes),
         ("sync", cmd_sync), ("git", cmd_git), ("gitkey", cmd_gitkey),
     ]:
         app.add_handler(CommandHandler(cmd, fn))
