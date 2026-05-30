@@ -181,14 +181,6 @@
     "exclusions": []
   },
   {
-    "username": "nihilusbtc",
-    "source": "list",
-    "tags": [
-      "giveaway"
-    ],
-    "exclusions": []
-  },
-  {
     "username": "okx",
     "source": "list",
     "tags": [
@@ -229,6 +221,18 @@
   },
   {
     "username": "bybit_official",
+    "source": "list",
+    "tags": [],
+    "exclusions": []
+  },
+  {
+    "username": "binanceukraine",
+    "source": "list",
+    "tags": [],
+    "exclusions": []
+  },
+  {
+    "username": "binancevip",
     "source": "list",
     "tags": [],
     "exclusions": []
