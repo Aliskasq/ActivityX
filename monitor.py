@@ -504,8 +504,9 @@ async def timeline_scan_loop(app: Application):
     global _timeline_scan_requested, _single_account_scan
 
     logger.info("Timeline scan loop started")
-    # Track which windows were completed today
-    completed_today: dict[str, str] = {}  # window_key -> date
+    # Track which windows were completed (cleared only when window becomes inactive,
+    # NOT on date change — this fixes overnight windows like 21:00-02:00 firing twice)
+    completed_windows: dict[str, datetime] = {}  # window_key -> when completed (MSK)
 
     while True:
         try:
@@ -532,15 +533,26 @@ async def timeline_scan_loop(app: Application):
                 continue
 
             now_msk = datetime.now(MSK)
-            today = now_msk.strftime("%Y-%m-%d")
 
-            # Clean completed_today on date change
-            completed_today = {k: v for k, v in completed_today.items() if v == today}
+            # Clean completed_windows: remove entries for windows that are
+            # no longer active (the window has ended since we last scanned).
+            # This way overnight windows stay "completed" until they fully close.
+            for start, end in windows:
+                wk = _window_key(start, end)
+                if wk in completed_windows and not _in_time_window(now_msk, start, end):
+                    del completed_windows[wk]
+                    logger.info(f"[timeline] Window {wk} ended, cleared from completed")
+
+            # Also clean keys that no longer match any configured window
+            configured_keys = {_window_key(s, e) for s, e in windows}
+            for wk in list(completed_windows.keys()):
+                if wk not in configured_keys:
+                    del completed_windows[wk]
 
             active_window = None
             for start, end in windows:
                 wk = _window_key(start, end)
-                if _in_time_window(now_msk, start, end) and completed_today.get(wk) != today:
+                if _in_time_window(now_msk, start, end) and wk not in completed_windows:
                     active_window = (start, end)
                     break
 
@@ -573,7 +585,7 @@ async def timeline_scan_loop(app: Application):
 
             # Run the scan
             await _run_timeline_scan(app, label=f"окно {wk}")
-            completed_today[wk] = today
+            completed_windows[wk] = datetime.now(MSK)
 
         except Exception as e:
             logger.error(f"Timeline scan loop error: {e}", exc_info=True)
