@@ -14,7 +14,9 @@
       "like+repost",
       "like+rt"
     ],
-    "exclusions": []
+    "exclusions": [
+      "congratulations"
+    ]
   },
   {
     "username": "binance",
@@ -30,7 +32,9 @@
       "reward+bnb",
       "reward+usdc"
     ],
-    "exclusions": []
+    "exclusions": [
+      "congratulations"
+    ]
   },
   {
     "username": "htx_global",
@@ -39,7 +43,9 @@
       "follow+rt",
       "giveaway"
     ],
-    "exclusions": []
+    "exclusions": [
+      "congratulations"
+    ]
   },
   {
     "username": "bitmartexchange",
@@ -49,7 +55,9 @@
       "create",
       "quote"
     ],
-    "exclusions": []
+    "exclusions": [
+      "congratulations"
+    ]
   },
   {
     "username": "mexc",
@@ -59,7 +67,8 @@
     ],
     "exclusions": [
       "trade",
-      "referral"
+      "referral",
+      "congratulations"
     ]
   },
   {
@@ -70,7 +79,9 @@
       "giveaway",
       "create"
     ],
-    "exclusions": []
+    "exclusions": [
+      "congratulations"
+    ]
   },
   {
     "username": "aeon_community",
@@ -79,7 +90,9 @@
       "winners",
       "follow+rt"
     ],
-    "exclusions": []
+    "exclusions": [
+      "congratulations"
+    ]
   },
   {
     "username": "bingxofficial",
@@ -88,7 +101,9 @@
       "winners",
       "follow+rt"
     ],
-    "exclusions": []
+    "exclusions": [
+      "congratulations"
+    ]
   },
   {
     "username": "bitunixofficial",
@@ -98,7 +113,7 @@
       "follow+rt"
     ],
     "exclusions": [
-      "trend"
+      "congratulations"
     ]
   },
   {
@@ -110,7 +125,9 @@
       "follow+repost",
       "follow+rt"
     ],
-    "exclusions": []
+    "exclusions": [
+      "congratulations"
+    ]
   },
   {
     "username": "ellipal",
@@ -121,7 +138,9 @@
       "follow+rt",
       "follow+like"
     ],
-    "exclusions": []
+    "exclusions": [
+      "congratulations"
+    ]
   },
   {
     "username": "gate",
@@ -131,7 +150,9 @@
       "follow+like",
       "follow+rt"
     ],
-    "exclusions": []
+    "exclusions": [
+      "congratulations"
+    ]
   },
   {
     "username": "kucoincom",
@@ -143,7 +164,8 @@
     ],
     "exclusions": [
       "order",
-      "trade"
+      "trade",
+      "congratulations"
     ]
   },
   {
@@ -152,7 +174,9 @@
     "tags": [
       "winners"
     ],
-    "exclusions": []
+    "exclusions": [
+      "congratulations"
+    ]
   },
   {
     "username": "binance_intern",
@@ -160,7 +184,9 @@
     "tags": [
       "winners"
     ],
-    "exclusions": []
+    "exclusions": [
+      "congratulations"
+    ]
   },
   {
     "username": "crypto__haris",
@@ -170,7 +196,9 @@
       "giveaway",
       "drop+uid"
     ],
-    "exclusions": []
+    "exclusions": [
+      "congratulations"
+    ]
   },
   {
     "username": "binanceangels",
@@ -178,7 +206,9 @@
     "tags": [
       "follow+usdc"
     ],
-    "exclusions": []
+    "exclusions": [
+      "congratulations"
+    ]
   },
   {
     "username": "okx",
@@ -189,7 +219,8 @@
       "winners"
     ],
     "exclusions": [
-      "trade"
+      "trade",
+      "congratulations"
     ]
   },
   {
@@ -199,7 +230,9 @@
       "giveaway",
       "winners"
     ],
-    "exclusions": []
+    "exclusions": [
+      "congratulations"
+    ]
   },
   {
     "username": "bybitafrica",
@@ -208,7 +241,8 @@
       "winners"
     ],
     "exclusions": [
-      "ama"
+      "ama",
+      "congratulations"
     ]
   },
   {
@@ -217,13 +251,17 @@
     "tags": [
       "winners"
     ],
-    "exclusions": []
+    "exclusions": [
+      "congratulations"
+    ]
   },
   {
     "username": "bybit_official",
     "source": "list",
     "tags": [],
-    "exclusions": []
+    "exclusions": [
+      "congratulations"
+    ]
   },
   {
     "username": "binanceukraine",
@@ -235,6 +273,8 @@
     "username": "binancevip",
     "source": "list",
     "tags": [],
-    "exclusions": []
+    "exclusions": [
+      "congratulations"
+    ]
   }
 ]
