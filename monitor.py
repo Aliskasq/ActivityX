@@ -209,7 +209,7 @@ async def _daily_cleanup(app: Application):
     if now_msk.hour < 0 or (now_msk.hour == 0 and now_msk.minute < 0):
         return
     _last_cleanup_date = today
-    deleted = db.cleanup_old(days=7)
+    deleted = db.cleanup_old(days=45)
     if deleted:
         logger.info(f"🧹 Cleanup: deleted {deleted} seen tweets older than 7 days")
 
