@@ -7,3 +7,4 @@ cookies.json
 bot.log
 *.pyc
 data/monitor.db
+data/monitor.db
