@@ -68,7 +68,9 @@
     "exclusions": [
       "trade",
       "referral",
-      "congratulations"
+      "congratulations",
+      "congrats",
+      "launchpad"
     ]
   },
   {
@@ -102,7 +104,8 @@
       "follow+rt"
     ],
     "exclusions": [
-      "congratulations"
+      "congratulations",
+      "congrats"
     ]
   },
   {
