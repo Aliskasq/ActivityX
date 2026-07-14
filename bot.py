@@ -71,7 +71,11 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/time 18:05 20:49 — расписание скана (МСК)\n"
         "/time 20 — интервал каждые N мин\n"
         "/sleep 02:00-05:00 — время сна (МСК)\n"
-        "/status — статус",
+        "/status — статус\n\n"
+        "Поиск:\n"
+        "/search $BTC — поиск последних твитов\n"
+        "/search $LAB 20 — 20 последних\n"
+        "/top $BTC — топ твиты (по популярности)",
     )
 
 
@@ -1133,6 +1137,139 @@ async def cmd_fix_hashes(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines))
 
 
+async def cmd_search(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Search Twitter using SearchTimeline."""
+    if not is_admin(update.effective_user.id):
+        return
+    if not ctx.args:
+        await update.message.reply_text("Использование: /search $BTC [кол-во]")
+        return
+
+    count = 10
+    query_parts = []
+    for arg in ctx.args:
+        if arg.isdigit():
+            count = min(int(arg), 50)
+        else:
+            query_parts.append(arg)
+
+    query = " ".join(query_parts)
+    if not query:
+        await update.message.reply_text("Укажи запрос: /search $BTC")
+        return
+
+    msg = await update.message.reply_text(f"🔍 Ищу «{query}»...")
+
+    from scraper import fetch_search_tweets
+    try:
+        tweets = await fetch_search_tweets(query, count=count, product="Latest")
+    except Exception as e:
+        await msg.edit_text(f"❌ Ошибка поиска: {e}")
+        return
+
+    if not tweets:
+        await msg.edit_text(f"Ничего не найдено по «{query}»")
+        return
+
+    lines = [f"🔍 <b>{query}</b> — {len(tweets)} твитов:\n"]
+    for i, t in enumerate(tweets, 1):
+        time_str = t.created_at[:16] if t.created_at else "?"
+        text = t.text
+        if len(text) > 200:
+            text = text[:197] + "..."
+        text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        lines.append(
+            f"<b>{i}.</b> 🕐 {time_str}\n"
+            f"<b>@{t.username}</b>\n"
+            f"{text}\n"
+            f"<a href=\"{t.url}\">→ открыть</a>\n"
+        )
+
+    full = "\n".join(lines)
+    # Split if too long
+    if len(full) <= 4000:
+        await msg.edit_text(full, parse_mode="HTML", disable_web_page_preview=True)
+    else:
+        chunks = []
+        current = ""
+        for line in lines:
+            if len(current) + len(line) > 3900:
+                chunks.append(current)
+                current = ""
+            current += line + "\n"
+        if current:
+            chunks.append(current)
+        await msg.edit_text(chunks[0], parse_mode="HTML", disable_web_page_preview=True)
+        for chunk in chunks[1:]:
+            await update.message.reply_text(
+                chunk, parse_mode="HTML", disable_web_page_preview=True
+            )
+
+
+async def cmd_top_search(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Search top tweets on Twitter."""
+    if not is_admin(update.effective_user.id):
+        return
+    if not ctx.args:
+        await update.message.reply_text("Использование: /top $BTC [кол-во]")
+        return
+
+    count = 10
+    query_parts = []
+    for arg in ctx.args:
+        if arg.isdigit():
+            count = min(int(arg), 50)
+        else:
+            query_parts.append(arg)
+
+    query = " ".join(query_parts)
+    msg = await update.message.reply_text(f"🏆 Ищу топ по «{query}»...")
+
+    from scraper import fetch_search_tweets
+    try:
+        tweets = await fetch_search_tweets(query, count=count, product="Top")
+    except Exception as e:
+        await msg.edit_text(f"❌ Ошибка: {e}")
+        return
+
+    if not tweets:
+        await msg.edit_text(f"Ничего не найдено по «{query}»")
+        return
+
+    lines = [f"🏆 <b>{query}</b> — топ {len(tweets)}:\n"]
+    for i, t in enumerate(tweets, 1):
+        time_str = t.created_at[:16] if t.created_at else "?"
+        text = t.text
+        if len(text) > 200:
+            text = text[:197] + "..."
+        text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        lines.append(
+            f"<b>{i}.</b> 🕐 {time_str}\n"
+            f"<b>@{t.username}</b>\n"
+            f"{text}\n"
+            f"<a href=\"{t.url}\">→ открыть</a>\n"
+        )
+
+    full = "\n".join(lines)
+    if len(full) <= 4000:
+        await msg.edit_text(full, parse_mode="HTML", disable_web_page_preview=True)
+    else:
+        chunks = []
+        current = ""
+        for line in lines:
+            if len(current) + len(line) > 3900:
+                chunks.append(current)
+                current = ""
+            current += line + "\n"
+        if current:
+            chunks.append(current)
+        await msg.edit_text(chunks[0], parse_mode="HTML", disable_web_page_preview=True)
+        for chunk in chunks[1:]:
+            await update.message.reply_text(
+                chunk, parse_mode="HTML", disable_web_page_preview=True
+            )
+
+
 async def cmd_scan_one(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Show account buttons for single-account scan."""
     if not is_admin(update.effective_user.id):
@@ -1275,6 +1412,8 @@ def setup_handlers(app: Application):
         ("scan", cmd_scan), ("scan_now", cmd_scan_now), ("scan_one", cmd_scan_one),
         ("reset_seen", cmd_reset_seen), ("fix_hashes", cmd_fix_hashes),
         ("sync", cmd_sync), ("git", cmd_git), ("gitkey", cmd_gitkey),
+        ("search", cmd_search), ("s", cmd_search),
+        ("top", cmd_top_search),
     ]:
         app.add_handler(CommandHandler(cmd, fn))
 

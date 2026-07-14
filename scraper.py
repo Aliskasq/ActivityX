@@ -4,8 +4,10 @@ import json
 import logging
 import os
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 import httpx
+import bs4
 
 from config import COOKIES_PATH, TWITTER_LIST_ID
 
@@ -13,11 +15,16 @@ logger = logging.getLogger(__name__)
 
 import re as _re
 
+# --- XClientTransaction support for SearchTimeline ---
+_ct_instance = None  # ClientTransaction singleton
+_ct_init_time = 0
+
 BEARER = "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
 LIST_GQL_HASH = "EaZggwYxthCW30dKBN807Q"
 MEMBERS_GQL_HASH = "qC0uLn_94QWJSpRZzzaJ-A"
 USER_TWEETS_GQL_HASH = "3AS73VJOTCg8ePuvJndFew"
 USER_BY_SCREEN_NAME_GQL_HASH = "IGgvgiOx4QZndDHuD3x9TQ"
+SEARCH_GQL_HASH = "flaR-PUMshxFWZWPNpq4zA"
 
 # Operations we track for auto-update
 _GQL_OPERATIONS = {
@@ -25,6 +32,7 @@ _GQL_OPERATIONS = {
     "ListMembers": "MEMBERS_GQL_HASH",
     "UserTweets": "USER_TWEETS_GQL_HASH",
     "UserByScreenName": "USER_BY_SCREEN_NAME_GQL_HASH",
+    "SearchTimeline": "SEARCH_GQL_HASH",
 }
 
 GQL_FEATURES = {
@@ -750,3 +758,164 @@ def matches_keywords(tweet: Tweet, keywords: list[str], exclusions: list[str] | 
             if _word_in_text(kw_lower, text_lower):
                 return True
     return False
+
+
+# ---------------------------------------------------------------------------
+# SearchTimeline with x-client-transaction-id
+# ---------------------------------------------------------------------------
+
+async def _ensure_ct_init(client: httpx.AsyncClient):
+    """Initialize ClientTransaction for x-client-transaction-id generation."""
+    global _ct_instance, _ct_init_time
+    import time as _time
+
+    try:
+        from x_client_transaction import ClientTransaction
+        from x_client_transaction.utils import get_ondemand_file_url
+    except ImportError:
+        logger.warning("XClientTransaction not installed — search will not work. "
+                       "Run: pip install XClientTransaction")
+        return None
+
+    # Re-init every hour
+    if _ct_instance and (_time.time() - _ct_init_time) < 3600:
+        return _ct_instance
+
+    logger.info("[search] Initializing ClientTransaction...")
+    resp = await client.get("https://x.com")
+    if resp.status_code != 200:
+        logger.error("[search] Failed to fetch x.com: %s", resp.status_code)
+        return None
+
+    soup = bs4.BeautifulSoup(resp.content, "html.parser")
+    ondemand_url = get_ondemand_file_url(response=soup)
+    ondemand_resp = await client.get(url=ondemand_url)
+
+    _ct_instance = ClientTransaction(
+        home_page_response=soup,
+        ondemand_file_response=ondemand_resp.text,
+    )
+    _ct_init_time = _time.time()
+    logger.info("[search] ClientTransaction ready")
+    return _ct_instance
+
+
+async def fetch_search_tweets(
+    query: str,
+    count: int = 20,
+    product: str = "Latest",
+) -> list[Tweet]:
+    """Search Twitter using SearchTimeline GraphQL endpoint.
+
+    Args:
+        query: search query (e.g. "$LAB", "$BTC")
+        count: number of tweets to fetch
+        product: "Latest" or "Top"
+
+    Returns:
+        List of Tweet objects
+    """
+    cookies = _load_cookies()
+    if not cookies:
+        logger.error("[search] No cookies available")
+        return []
+
+    headers = _build_headers(cookies)
+    # Also need Cookie header for x.com home page
+    cookie_str = "; ".join(f"{k}={v}" for k, v in cookies.items())
+
+    async with httpx.AsyncClient(
+        headers={
+            "user-agent": headers["user-agent"],
+            "cookie": cookie_str,
+        },
+        follow_redirects=True,
+        timeout=30,
+    ) as client:
+        # Init ClientTransaction
+        ct = await _ensure_ct_init(client)
+        if ct is None:
+            logger.error("[search] ClientTransaction not available")
+            return []
+
+        # Build search request
+        url = f"https://x.com/i/api/graphql/{SEARCH_GQL_HASH}/SearchTimeline"
+        path = urlparse(url).path
+        tid = ct.generate_transaction_id(method="GET", path=path)
+
+        api_headers = dict(headers)
+        api_headers["x-client-transaction-id"] = tid
+        api_headers["accept"] = "application/json"
+
+        variables = {
+            "rawQuery": query,
+            "count": count,
+            "querySource": "typed_query",
+            "product": product,
+        }
+
+        features_json = json.dumps(GQL_FEATURES, separators=(",", ":"))
+        params = {
+            "variables": json.dumps(variables, separators=(",", ":")),
+            "features": features_json,
+        }
+
+        resp = await client.get(url, headers=api_headers, params=params)
+
+        if resp.status_code != 200:
+            logger.error("[search] SearchTimeline failed: %s %s",
+                         resp.status_code, resp.text[:200])
+            # Trigger hash auto-fix on next run
+            return []
+
+        data = resp.json()
+        return _parse_search_results(data)
+
+
+def _parse_search_results(data: dict) -> list[Tweet]:
+    """Parse SearchTimeline response into Tweet objects."""
+    tweets = []
+    instructions = (
+        data.get("data", {})
+        .get("search_by_raw_query", {})
+        .get("search_timeline", {})
+        .get("timeline", {})
+        .get("instructions", [])
+    )
+
+    for instruction in instructions:
+        for entry in instruction.get("entries", []):
+            content = entry.get("content", {})
+            item_content = content.get("itemContent", {})
+            tweet_results = item_content.get("tweet_results", {})
+            result = tweet_results.get("result", {})
+
+            typename = result.get("__typename")
+            if typename == "TweetWithVisibilityResults":
+                result = result.get("tweet", {})
+                typename = result.get("__typename")
+            if typename != "Tweet":
+                continue
+
+            legacy = result.get("legacy", {})
+            user_legacy = (
+                result.get("core", {})
+                .get("user_results", {})
+                .get("result", {})
+                .get("legacy", {})
+            )
+
+            screen_name = user_legacy.get("screen_name", "unknown")
+            tweet_id = result.get("rest_id", "")
+            text = legacy.get("full_text", "")
+            created = legacy.get("created_at", "")
+
+            tweets.append(Tweet(
+                tweet_id=tweet_id,
+                text=text,
+                username=screen_name,
+                created_at=created,
+                url=f"https://x.com/{screen_name}/status/{tweet_id}",
+            ))
+
+    return tweets
