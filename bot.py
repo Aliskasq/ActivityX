@@ -317,8 +317,12 @@ async def _test_single_model(model_id: str, api_key: str) -> tuple[str, bool, st
             )
             if resp.status_code == 200:
                 data = resp.json()
-                text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                return (model_id, True, text[:30])
+                if "error" in data:
+                    return (model_id, False, data["error"].get("message", "unknown")[:40])
+                choices = data.get("choices") or [{}]
+                msg = choices[0].get("message") or {}
+                text = msg.get("content") or msg.get("reasoning") or ""
+                return (model_id, True, (text or "")[:30])
             else:
                 return (model_id, False, f"HTTP {resp.status_code}")
     except Exception as e:
@@ -359,22 +363,84 @@ async def cmd_models_test(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 pass
 
-    # Build result
-    text = f"🧪 Тест моделей завершён\n\n"
-    text += f"✅ Активные ({len(active)}):\n"
-    for m_id in active:
-        text += f"  • {m_id}\n"
+    current = get_model()
+
+    # Build result text
+    text = f"🧪 Тест завершён\n\n"
+    text += f"🤖 Активная: {current}\n"
+    text += f"✅ Работают: {len(active)} | ❌ Нет: {len(failed)}\n\n"
+    text += "Выбери модель кнопкой 👇"
 
     if failed:
-        text += f"\n❌ Неактивные ({len(failed)}):\n"
+        text += f"\n\n❌ Неактивные ({len(failed)}):\n"
         for m_id, reason in failed:
             text += f"  • {m_id} — {reason}\n"
 
-    # Send as push (new message, not edit) so it's visible
+    # Build buttons for active models (2 per row)
+    buttons = []
+    row = []
+    for m_id in active:
+        short = m_id.replace(":free", "").split("/")[-1]
+        marker = "✅ " if m_id == current else ""
+        label = f"{marker}{short}"
+        cb_data = f"setm:{m_id}"
+        if len(cb_data.encode()) > 64:
+            cb_data = cb_data[:64]
+        row.append(InlineKeyboardButton(label, callback_data=cb_data))
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+
     if len(text) > 4000:
         text = text[:3950] + "\n\n... (обрезано)"
 
-    await msg.edit_text(text)
+    await msg.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+
+async def callback_model_select(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Handle model selection from test results."""
+    query = update.callback_query
+    if not is_admin(query.from_user.id):
+        await query.answer("⛔")
+        return
+    model_id = query.data.split(":", 1)[1]
+    set_model(model_id)
+    await query.answer(f"✅ {model_id}")
+
+    # Update buttons to show new selection
+    old_markup = query.message.reply_markup
+    if old_markup:
+        new_buttons = []
+        for brow in old_markup.inline_keyboard:
+            new_row = []
+            for btn in brow:
+                cb = btn.callback_data or ""
+                if cb.startswith("setm:"):
+                    btn_model = cb.split(":", 1)[1]
+                    short = btn_model.replace(":free", "").split("/")[-1]
+                    marker = "✅ " if btn_model == model_id else ""
+                    new_row.append(InlineKeyboardButton(
+                        f"{marker}{short}", callback_data=cb
+                    ))
+                else:
+                    new_row.append(btn)
+            new_buttons.append(new_row)
+        try:
+            import re
+            old_text = query.message.text or ""
+            new_text = re.sub(
+                r"🤖 Активная: .+",
+                f"🤖 Активная: {model_id}",
+                old_text,
+            )
+            await query.edit_message_text(
+                new_text,
+                reply_markup=InlineKeyboardMarkup(new_buttons),
+            )
+        except Exception:
+            pass
 
 
 async def cmd_models(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -1428,5 +1494,6 @@ def setup_handlers(app: Application):
     app.add_handler(CallbackQueryHandler(callback_scan_set_period, pattern=r"^scan:set_period$"))
     app.add_handler(CallbackQueryHandler(callback_scan_period_pick, pattern=r"^scanperiod:"))
     app.add_handler(CallbackQueryHandler(callback_scan_back, pattern=r"^scan:back$"))
+    app.add_handler(CallbackQueryHandler(callback_model_select, pattern=r"^setm:"))
     app.add_handler(CallbackQueryHandler(callback_back, pattern=r"^back:"))
     app.add_handler(CallbackQueryHandler(callback_noop, pattern=r"^noop:"))
